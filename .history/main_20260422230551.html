@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tchisel — Tchisla Solver</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@300;400;500&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+    --bg: #08090f;
+    --surface: #0f1118;
+    --surface2: #161822;
+    --border: #1e2030;
+    --gold: #c9a84c;
+    --gold-dim: #8a7434;
+    --gold-glow: #c9a84c33;
+    --text: #d4d0c8;
+    --text-dim: #5a5848;
+    --text-muted: #3a3830;
+    --green: #6aab73;
+    --green-dim: #1a2a1a;
+    --red: #ab6a6a;
+    --red-dim: #2a1a1a;
+}
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+/* ─── Grain overlay ─── */
+body::before {
+    content: '';
+    position: fixed; top: 0; left: 0;
+    width: 100%; height: 100%;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 1000;
+}
+
+.container {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+}
+
+/* ─── Header ─── */
+header {
+    text-align: center;
+    margin-bottom: 48px;
+    animation: fadeIn 0.8s ease;
+}
+
+header h1 {
+    font-size: 42px;
+    font-weight: 700;
+    letter-spacing: 12px;
+    color: var(--gold);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+}
+
+header p {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 4px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+}
+
+/* ─── Sections ─── */
+.section-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 3px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+}
+
+/* ─── Digit selector ─── */
+.digit-grid {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 32px;
+    flex-wrap: wrap;
+}
+
+.digit-btn {
+    width: 52px; height: 52px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text-dim);
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 22px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.digit-btn:hover {
+    border-color: var(--gold-dim);
+    color: var(--text);
+    transform: translateY(-1px);
+}
+
+.digit-btn.active {
+    border-color: var(--gold);
+    color: var(--gold);
+    background: var(--surface2);
+    box-shadow: 0 0 20px var(--gold-glow), inset 0 0 20px var(--gold-glow);
+}
+
+/* ─── Input row ─── */
+.input-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 24px;
+    align-items: stretch;
+}
+
+.target-input {
+    flex: 1;
+    padding: 14px 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.target-input:focus {
+    border-color: var(--gold-dim);
+}
+
+.target-input::placeholder {
+    color: var(--text-muted);
+}
+
+.max-select {
+    padding: 14px 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-dim);
+    outline: none;
+    cursor: pointer;
+    -webkit-appearance: none;
+}
+
+/* ─── Solve button ─── */
+.solve-btn {
+    width: 100%;
+    padding: 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    background: var(--gold);
+    color: var(--bg);
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-bottom: 32px;
+}
+
+.solve-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
+.solve-btn:active { transform: translateY(0); }
+.solve-btn:disabled {
+    background: var(--surface2);
+    color: var(--text-muted);
+    cursor: default;
+    transform: none;
+}
+
+/* ─── Result card ─── */
+.result-card {
+    padding: 32px 24px;
+    border-radius: 8px;
+    margin-bottom: 32px;
+    animation: slideUp 0.4s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.result-card.success {
+    background: var(--green-dim);
+    border: 1px solid #2a4a2a;
+}
+
+.result-card.fail {
+    background: var(--red-dim);
+    border: 1px solid #4a2a2a;
+}
+
+.result-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+}
+
+.result-card.success .result-badge { color: var(--green); }
+.result-card.fail .result-badge { color: var(--red); }
+
+.result-formula {
+    text-align: center;
+    padding: 16px 0;
+    overflow-x: auto;
+}
+
+.result-formula .katex { font-size: 1.6em; }
+
+.result-stats {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid #ffffff0a;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+/* ─── Progress ─── */
+.progress-bar {
+    padding: 14px 16px;
+    background: var(--surface);
+    border-left: 3px solid var(--gold);
+    border-radius: 0 6px 6px 0;
+    margin-bottom: 24px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+    animation: pulse 1.5s ease infinite;
+}
+
+.progress-bar span { color: var(--gold); }
+
+/* ─── History ─── */
+.history-item {
+    padding: 12px 16px;
+    background: var(--surface);
+    border-radius: 6px;
+    margin-bottom: 4px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    transition: background 0.15s;
+    border: 1px solid transparent;
+}
+
+.history-item:hover {
+    background: var(--surface2);
+    border-color: var(--border);
+}
+
+.history-item .target {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    color: var(--gold);
+}
+
+.history-item .meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+}
+
+.history-item .digits-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--green);
+}
+
+/* ─── Quick picks ─── */
+.quick-picks {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 32px;
+}
+
+.quick-btn {
+    padding: 6px 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.quick-btn:hover {
+    color: var(--text-dim);
+    border-color: var(--gold-dim);
+}
+
+/* ─── Animations ─── */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* KaTeX color override for dark theme */
+.katex { color: var(--text) !important; }
+</style>
+</head>
+<body>
+
+<div class="container" id="app"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  TCHISEL UI (C++ backend mode)
+//
+//  This page no longer solves in JavaScript.
+//  It keeps the same UI, but sends requests to a local HTTP endpoint
+//  powered by tchisel.cpp (or a wrapper around it).
+//
+//  Expected endpoint:
+//      POST http://127.0.0.1:8080/solve
+//      { "digit": 8, "target": 1024, "maxDigits": 8 }
+//
+//  Expected JSON response:
+//      {
+//        "found": true,
+//        "digits": 3,
+//        "latex": "\\sqrt{...}",
+//        "formula": "optional plain-text formula",
+//        "stats": [[1, 1], [2, 17], [3, 923]],
+//        "message": "optional message"
+//      }
+// ═══════════════════════════════════════════════════════════
+
+const SOLVER_ENDPOINT = '/solve';
+
+let state = {
+    digit: null,
+    target: '',
+    maxDigits: 8,
+    result: null,
+    solving: false,
+    progress: null,
+    history: [],
+    error: '',
+    lastFormulaText: ''
+};
+
+function escapeHtml(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function normalizeResult(raw, target) {
+    const stats = Array.isArray(raw?.stats)
+        ? raw.stats.filter(x => Array.isArray(x) && x.length >= 2)
+        : [];
+
+    const found = Boolean(raw?.found);
+    const digits = Number.isFinite(Number(raw?.digits)) ? Number(raw.digits) : state.maxDigits;
+    const latex = typeof raw?.latex === 'string' ? raw.latex : '';
+    const formula = typeof raw?.formula === 'string' ? raw.formula : '';
+    const message = typeof raw?.message === 'string' ? raw.message : '';
+
+    return { found, digits, latex, formula, message, stats, target };
+}
+
+
+function tokenizeFormula(input) {
+    const tokens = [];
+    let i = 0;
+    while (i < input.length) {
+        const ch = input[i];
+        if (/\s/.test(ch)) { i++; continue; }
+        if (/[0-9]/.test(ch)) {
+            let j = i + 1;
+            while (j < input.length && /[0-9]/.test(input[j])) j++;
+            tokens.push({ type: 'number', value: input.slice(i, j) });
+            i = j;
+            continue;
+        }
+        if (/[A-Za-z_]/.test(ch)) {
+            let j = i + 1;
+            while (j < input.length && /[A-Za-z_0-9]/.test(input[j])) j++;
+            tokens.push({ type: 'ident', value: input.slice(i, j) });
+            i = j;
+            continue;
+        }
+        if ('+-*/(),^!'.includes(ch)) {
+            tokens.push({ type: ch, value: ch });
+            i++;
+            continue;
+        }
+        throw new Error(`Unexpected character: ${ch}`);
+    }
+    return tokens;
+}
+
+function parseFormulaToAst(input) {
+    const tokens = tokenizeFormula(input);
+    let pos = 0;
+
+    const peek = () => tokens[pos] || null;
+    const consume = (type = null) => {
+        const tok = tokens[pos] || null;
+        if (!tok) throw new Error('Unexpected end of expression');
+        if (type && tok.type !== type) throw new Error(`Expected ${type} but found ${tok.type}`);
+        pos++;
+        return tok;
+    };
+
+    function parseExpression() {
+        return parseAddSub();
+    }
+
+    function parseAddSub() {
+        let node = parseMulDiv();
+        while (peek() && (peek().type === '+' || peek().type === '-')) {
+            const op = consume().type;
+            const rhs = parseMulDiv();
+            node = { type: 'binary', op, left: node, right: rhs };
+        }
+        return node;
+    }
+
+    function parseMulDiv() {
+        let node = parsePower();
+        while (peek() && (peek().type === '*' || peek().type === '/')) {
+            const op = consume().type;
+            const rhs = parsePower();
+            node = { type: 'binary', op, left: node, right: rhs };
+        }
+        return node;
+    }
+
+    function parsePower() {
+        let node = parseUnary();
+        if (peek() && peek().type === '^') {
+            consume('^');
+            const rhs = parsePower(); // right-associative
+            node = { type: 'pow', base: node, exp: rhs };
+        }
+        return node;
+    }
+
+    function parseUnary() {
+        if (peek() && peek().type === '-') {
+            consume('-');
+            return { type: 'neg', value: parseUnary() };
+        }
+        let node = parsePrimary();
+        // postfix factorial
+        while (peek() && peek().type === '!') {
+            consume('!');
+            node = { type: 'factorial', value: node };
+        }
+        return node;
+    }
+
+    function parsePrimary() {
+        const tok = peek();
+        if (!tok) throw new Error('Unexpected end of expression');
+
+        if (tok.type === 'number') {
+            consume('number');
+            return { type: 'number', value: tok.value };
+        }
+
+        if (tok.type === '(') {
+            consume('(');
+            const inner = parseExpression();
+            consume(')');
+            return { type: 'group', value: inner };
+        }
+
+        if (tok.type === 'ident') {
+            const name = consume('ident').value;
+            if (name === 'sqrt') {
+                consume('(');
+                const inner = parseExpression();
+                consume(')');
+                return { type: 'sqrt', value: inner };
+            }
+            if (name === 'pow') {
+                consume('(');
+                const base = parseExpression();
+                consume(',');
+                const exp = parseExpression();
+                consume(')');
+                return { type: 'pow', base, exp };
+            }
+            return { type: 'ident', value: name };
+        }
+
+        throw new Error(`Unexpected token: ${tok.type}`);
+    }
+
+    const ast = parseExpression();
+    if (pos !== tokens.length) {
+        throw new Error('Unexpected trailing input');
+    }
+    return ast;
+}
+
+function formulaAstToLatex(node, parentPrec = 0, side = 'none') {
+    const precedence = n => {
+        if (!n) return 99;
+        if (n.type === 'number' || n.type === 'ident' || n.type === 'sqrt' || n.type === 'pow' || n.type === 'factorial') return 90;
+        if (n.type === 'group') return 95;
+        if (n.type === 'neg') return 80;
+        if (n.type === 'binary' && (n.op === '*' || n.op === '/')) return 60;
+        if (n.type === 'binary' && (n.op === '+' || n.op === '-')) return 50;
+        return 10;
+    };
+
+    const wrap = (latex, need) => need ? `\\left(${latex}\\right)` : latex;
+
+    if (!node) return '';
+    switch (node.type) {
+        case 'number':
+        case 'ident':
+            return String(node.value);
+        case 'factorial': {
+            const inner = formulaAstToLatex(node.value, 0, 'none');
+            const innerNode = node.value;
+            // Numbers and other factorials don't need parens
+            if (innerNode.type === 'number' || innerNode.type === 'factorial')
+                return `${inner}!`;
+            return `\\left(${inner}\\right)!`;
+        }
+        case 'group': {
+            const inner = formulaAstToLatex(node.value, 0, 'none');
+            return `\\left(${inner}\\right)`;
+        }
+        case 'sqrt': {
+            return `\\sqrt{${formulaAstToLatex(node.value, 0, 'none')}}`;
+        }
+        case 'pow': {
+            const bp = precedence(node.base);
+            const base = formulaAstToLatex(node.base, 80, 'left');
+            const exp = formulaAstToLatex(node.exp, 0, 'none');
+            return `${wrap(base, bp < 80)}^{${exp}}`;
+        }
+        case 'neg': {
+            const innerPrec = precedence(node.value);
+            const inner = formulaAstToLatex(node.value, 80, 'right');
+            return `-${wrap(inner, innerPrec < 80)}`;
+        }
+        case 'binary': {
+            if (node.op === '/') {
+                return `\\dfrac{${formulaAstToLatex(node.left, 0, 'none')}}{${formulaAstToLatex(node.right, 0, 'none')}}`;
+            }
+            const prec = precedence(node);
+            const leftPrec = precedence(node.left);
+            const rightPrec = precedence(node.right);
+            const left = formulaAstToLatex(node.left, prec, 'left');
+            const right = formulaAstToLatex(node.right, prec, 'right');
+            const needLeft = leftPrec < prec;
+            const needRight = rightPrec < prec || (rightPrec === prec && (node.op === '-' || node.op === '*'));
+            const opLatex = node.op === '*' ? ' \\times ' : ` ${node.op} `;
+            const out = `${wrap(left, needLeft)}${opLatex}${wrap(right, needRight)}`;
+            return wrap(out, prec < parentPrec || (prec === parentPrec && side === 'right' && node.op === '-'));
+        }
+        default:
+            return '';
+    }
+}
+
+function formulaToLatex(formula) {
+    if (!formula || typeof formula !== 'string') return '';
+    try {
+        const ast = parseFormulaToAst(formula);
+        return formulaAstToLatex(ast);
+    } catch (e) {
+        return '';
+    }
+}
+
+function render() {
+    const app = document.getElementById('app');
+
+    let html = `
+        <header>
+            <h1>Tchisel</h1>
+            <p>Tchisla Solver</p>
+        </header>
+
+        <div class="section-label">Choose your digit</div>
+        <div class="digit-grid">
+            ${[1,2,3,4,5,6,7,8,9].map(d => `
+                <button class="digit-btn ${state.digit === d ? 'active' : ''}"
+                                onclick="selectDigit(${d})">${d}</button>
+            `).join('')}
+        </div>
+    `;
+
+    if (state.digit) {
+        html += `
+            <div class="section-label">Target number</div>
+            <div class="input-row">
+                <input type="number" class="target-input" id="targetInput"
+                            value="${escapeHtml(state.target)}" placeholder="e.g. 1729"
+                            oninput="state.target=this.value" onkeydown="if(event.key==='Enter')doSolve()">
+                <select class="max-select" onchange="state.maxDigits=+this.value">
+                    ${[4,5,6,7,8,9].map(n =>
+                        `<option value="${n}" ${state.maxDigits===n?'selected':''}>max ${n}</option>`
+                    ).join('')}
+                </select>
+            </div>
+
+            <div class="section-label">Try these</div>
+            <div class="quick-picks">
+                ${[100, 1024, 1729, 42, 256, 365, 720, 2025].map(n => `
+                    <button class="quick-btn" onclick="pickTarget(${n})">${n}</button>
+                `).join('')}
+            </div>
+
+            <button class="solve-btn" onclick="doSolve()"
+                            ${state.solving || !state.target ? 'disabled' : ''}>
+                ${state.solving ? 'Conjuring...' : 'Solve'}
+            </button>
+        `;
+    }
+
+    if (state.solving) {
+        html += `
+            <div class="progress-bar">
+                Consulting local C++ solver…
+                <span>${escapeHtml(state.progress?.label || 'tchisel.cpp')}</span>
+            </div>
+        `;
+    }
+
+    if (state.error) {
+        html += `
+            <div class="result-card fail">
+                <div class="result-badge">Solver unavailable</div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--red);line-height:1.7">
+                    ${escapeHtml(state.error)}
+                </div>
+                <div class="result-stats">
+                    endpoint: ${escapeHtml(SOLVER_ENDPOINT)}
+                </div>
+            </div>
+        `;
+    }
+
+    if (state.result) {
+        const r = state.result;
+        html += `
+            <div class="result-card ${r.found ? 'success' : 'fail'}">
+                ${r.found ? `
+                    <div class="result-badge">Solution found — ${r.digits} digit${r.digits>1?'s':''}</div>
+                    <div class="result-formula" id="formula"></div>
+                ` : `
+                    <div class="result-badge">No solution within ${state.maxDigits} digits</div>
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--red);line-height:1.7">
+                        ${escapeHtml(r.message || 'The C++ solver did not find a solution in the requested search range.')}
+                    </div>
+                `}
+                ${r.formula ? `
+                    <details style="margin-top:12px">
+                        <summary style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);cursor:pointer">show raw solver output</summary>
+                        <div style="margin-top:8px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);word-break:break-word">
+                            ${escapeHtml(r.formula)}
+                        </div>
+                    </details>
+                ` : ''}
+                <div class="result-stats">
+                    ${(r.stats?.length ? r.stats : [[r.digits, 0]]).map(([n, sz]) => `S[${n}]:${Number(sz).toLocaleString()}`).join(' &nbsp; ')}
+                </div>
+            </div>
+        `;
+    }
+
+    if (state.history.length) {
+        html += `<div class="section-label" style="margin-top:16px">Grimoire</div>`;
+        for (const h of state.history) {
+            html += `
+                <div class="history-item" onclick="rerun(${h.target},${h.digit})">
+                    <div>
+                        <span class="target">${h.target}</span>
+                        <span class="meta"> using ${h.digit}s</span>
+                    </div>
+                    <span class="digits-badge">${h.digits} digit${h.digits>1?'s':''}</span>
+                </div>
+            `;
+        }
+    }
+
+    app.innerHTML = html;
+
+    if (state.result && state.result.found) {
+        const el = document.getElementById('formula');
+        if (el) {
+            const derivedLatex = formulaToLatex(state.result.formula || '');
+            const latex = derivedLatex || state.result.latex || '';
+            try {
+                if (latex) {
+                    katex.render(
+                        `${state.target} = ${latex}`,
+                        el,
+                        { displayMode: true, throwOnError: false, trust: true }
+                    );
+                } else {
+                    el.textContent = `${state.target} = ${state.result.formula || ''}`;
+                }
+            } catch (e) {
+                el.textContent = `${state.target} = ${state.result.formula || state.result.latex || ''}`;
+            }
+        }
+    }
+}
+
+function selectDigit(d) {
+    state.digit = d;
+    state.result = null;
+    state.error = '';
+    render();
+    const inp = document.getElementById('targetInput');
+    if (inp) inp.focus();
+}
+
+function pickTarget(n) {
+    state.target = String(n);
+    state.result = null;
+    state.error = '';
+    render();
+}
+
+function rerun(target, digit) {
+    state.digit = digit;
+    state.target = String(target);
+    state.result = null;
+    state.error = '';
+    render();
+    setTimeout(doSolve, 100);
+}
+
+async function doSolve() {
+    if (!state.digit || !state.target) return;
+
+    const target = parseInt(state.target, 10);
+    if (!Number.isFinite(target)) return;
+
+    state.solving = true;
+    state.result = null;
+    state.error = '';
+    state.progress = { label: 'awaiting response' };
+    render();
+
+    try {
+        const response = await fetch(SOLVER_ENDPOINT, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                digit: state.digit,
+                target,
+                maxDigits: state.maxDigits
+            })
+        });
+
+        const text = await response.text();
+        let data = null;
+        try {
+            data = JSON.parse(text);
+        } catch (_) {
+            throw new Error('The local solver responded, but not with JSON.');
+        }
+
+        if (!response.ok) {
+            throw new Error(data?.message || `Solver returned HTTP ${response.status}.`);
+        }
+
+        const result = normalizeResult(data, target);
+        state.result = result;
+        if (result.found) {
+            state.history = [
+                { target, digit: state.digit, digits: result.digits },
+                ...state.history.filter(h => !(h.target === target && h.digit === state.digit)).slice(0, 19)
+            ];
+        }
+    } catch (err) {
+        state.error = (err && err.message)
+            ? err.message + ' Run a local server that exposes tchisel.cpp at ' + SOLVER_ENDPOINT + '.'
+            : 'Could not reach the local C++ solver.';
+    } finally {
+        state.solving = false;
+        state.progress = null;
+        render();
+    }
+}
+
+render();
+</script>
+</body>
+</html>

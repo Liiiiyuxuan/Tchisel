@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tchisel — Tchisla Solver</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@300;400;500&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #08090f;
+  --surface: #0f1118;
+  --surface2: #161822;
+  --border: #1e2030;
+  --gold: #c9a84c;
+  --gold-dim: #8a7434;
+  --gold-glow: #c9a84c33;
+  --text: #d4d0c8;
+  --text-dim: #5a5848;
+  --text-muted: #3a3830;
+  --green: #6aab73;
+  --green-dim: #1a2a1a;
+  --red: #ab6a6a;
+  --red-dim: #2a1a1a;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ─── Grain overlay ─── */
+body::before {
+  content: '';
+  position: fixed; top: 0; left: 0;
+  width: 100%; height: 100%;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 1000;
+}
+
+.container {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+}
+
+/* ─── Header ─── */
+header {
+  text-align: center;
+  margin-bottom: 48px;
+  animation: fadeIn 0.8s ease;
+}
+
+header h1 {
+  font-size: 42px;
+  font-weight: 700;
+  letter-spacing: 12px;
+  color: var(--gold);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+
+header p {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 4px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+/* ─── Sections ─── */
+.section-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 3px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+/* ─── Digit selector ─── */
+.digit-grid {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 32px;
+  flex-wrap: wrap;
+}
+
+.digit-btn {
+  width: 52px; height: 52px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-dim);
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 22px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.digit-btn:hover {
+  border-color: var(--gold-dim);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+
+.digit-btn.active {
+  border-color: var(--gold);
+  color: var(--gold);
+  background: var(--surface2);
+  box-shadow: 0 0 20px var(--gold-glow), inset 0 0 20px var(--gold-glow);
+}
+
+/* ─── Input row ─── */
+.input-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 24px;
+  align-items: stretch;
+}
+
+.target-input {
+  flex: 1;
+  padding: 14px 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.target-input:focus {
+  border-color: var(--gold-dim);
+}
+
+.target-input::placeholder {
+  color: var(--text-muted);
+}
+
+.max-select {
+  padding: 14px 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  outline: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+}
+
+/* ─── Solve button ─── */
+.solve-btn {
+  width: 100%;
+  padding: 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  background: var(--gold);
+  color: var(--bg);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 32px;
+}
+
+.solve-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
+.solve-btn:active { transform: translateY(0); }
+.solve-btn:disabled {
+  background: var(--surface2);
+  color: var(--text-muted);
+  cursor: default;
+  transform: none;
+}
+
+/* ─── Result card ─── */
+.result-card {
+  padding: 32px 24px;
+  border-radius: 8px;
+  margin-bottom: 32px;
+  animation: slideUp 0.4s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.result-card.success {
+  background: var(--green-dim);
+  border: 1px solid #2a4a2a;
+}
+
+.result-card.fail {
+  background: var(--red-dim);
+  border: 1px solid #4a2a2a;
+}
+
+.result-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin-bottom: 20px;
+}
+
+.result-card.success .result-badge { color: var(--green); }
+.result-card.fail .result-badge { color: var(--red); }
+
+.result-formula {
+  text-align: center;
+  padding: 16px 0;
+  overflow-x: auto;
+}
+
+.result-formula .katex { font-size: 1.6em; }
+
+.result-stats {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #ffffff0a;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* ─── Progress ─── */
+.progress-bar {
+  padding: 14px 16px;
+  background: var(--surface);
+  border-left: 3px solid var(--gold);
+  border-radius: 0 6px 6px 0;
+  margin-bottom: 24px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text-dim);
+  animation: pulse 1.5s ease infinite;
+}
+
+.progress-bar span { color: var(--gold); }
+
+/* ─── History ─── */
+.history-item {
+  padding: 12px 16px;
+  background: var(--surface);
+  border-radius: 6px;
+  margin-bottom: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transition: background 0.15s;
+  border: 1px solid transparent;
+}
+
+.history-item:hover {
+  background: var(--surface2);
+  border-color: var(--border);
+}
+
+.history-item .target {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  color: var(--gold);
+}
+
+.history-item .meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.history-item .digits-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--green);
+}
+
+/* ─── Quick picks ─── */
+.quick-picks {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 32px;
+}
+
+.quick-btn {
+  padding: 6px 14px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.quick-btn:hover {
+  color: var(--text-dim);
+  border-color: var(--gold-dim);
+}
+
+/* ─── Animations ─── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* KaTeX color override for dark theme */
+.katex { color: var(--text) !important; }
+</style>
+</head>
+<body>
+
+<div class="container" id="app"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  TCHISEL SOLVER ENGINE (ported from C++)
+// ═══════════════════════════════════════════════════════════
+
+const MAX_VAL = 1e12;
+const MAX_SET = 200000;
+
+const OP = {
+  CONCAT: 0, ADD: 1, SUB: 2, MUL: 3, DIV: 4, POW: 5,
+  SQRT: 6, SQRTMUL: 7, FACT: 8, NEG: 9,
+  POWRT1: 10, POWRT2: 11, POWRT3: 12, POWRT4: 13, POWRT5: 14
+};
+
+const FACT_TABLE = [1,1,2,6,24,120,720,5040,40320,362880,3628800,39916800,479001600];
+
+function safePow(base, exp) {
+  if (exp < 0 || base <= 0) return 0;
+  if (exp === 0) return 1;
+  if (base === 1) return 1;
+  if (base > 1000 || exp > 40) return 0;
+  let r = 1;
+  for (let i = 0; i < exp; i++) {
+    r *= base;
+    if (r > MAX_VAL) return 0;
+  }
+  return r;
+}
+
+function solve(digit, target, maxDigits, onProgress) {
+  const sets = [];
+  for (let i = 0; i <= 9; i++) sets[i] = new Map();
+
+  for (let n = 1; n <= maxDigits; n++) {
+    let concat = 0;
+    for (let k = 0; k < n; k++) concat = concat * 10 + digit;
+    sets[n].set(concat, { op: OP.CONCAT, sa: 0, sb: 0, a: 0, b: 0, nc: 0, dp: 0 });
+
+    for (let i = 1; i <= Math.floor(n / 2); i++) {
+      const j = n - i;
+      if (!sets[i].size || !sets[j].size) continue;
+
+      for (const [v1, d1] of sets[i]) {
+        if (sets[n].size >= MAX_SET) break;
+        for (const [v2, d2] of sets[j]) {
+          if (sets[n].size >= MAX_SET) break;
+          const nc = d1.nc + d2.nc;
+          const dp = Math.max(d1.dp, d2.dp) + 1;
+
+          const ins = (val, op, sa, sb, a, b, ncx) => {
+            if (Math.abs(val) > MAX_VAL) return;
+            const sc = (nc + ncx) * 1000 + dp;
+            const ex = sets[n].get(val);
+            if (ex && ex.nc * 1000 + ex.dp <= sc) return;
+            if (!ex && sets[n].size >= MAX_SET) return;
+            sets[n].set(val, { op, sa, sb, a, b, nc: nc + ncx, dp });
+          };
+
+          ins(v1 + v2, OP.ADD, i, j, v1, v2, 0);
+          ins(v1 - v2, OP.SUB, i, j, v1, v2, 0);
+          if (i !== j) ins(v2 - v1, OP.SUB, j, i, v2, v1, 0);
+
+          if (v1 !== 0 && v2 !== 0 && Math.abs(v1) <= MAX_VAL / Math.max(Math.abs(v2), 1)) {
+            ins(v1 * v2, OP.MUL, i, j, v1, v2, 0);
+          }
+
+          if (v2 !== 0 && v1 % v2 === 0) ins(v1 / v2, OP.DIV, i, j, v1, v2, 0);
+          if (i !== j && v1 !== 0 && v2 % v1 === 0) ins(v2 / v1, OP.DIV, j, i, v2, v1, 0);
+
+          // Exponentiation with sqrt-reduction
+          const tryPow = (sa, sb, base, exp) => {
+            if (base <= 0 || exp < 0) return;
+            if (exp <= 40) {
+              const p = safePow(base, exp);
+              if (p > 0) ins(p, OP.POW, sa, sb, base, exp, 0);
+            }
+            let red = exp;
+            for (let k = 1; k <= 5; k++) {
+              if (red % 2 !== 0) break;
+              red /= 2;
+              if (red > 40 || red < 1) continue;
+              const p = safePow(base, red);
+              if (p > 0) ins(p, OP.POWRT1 + k - 1, sa, sb, base, exp, 0);
+            }
+          };
+          if (v1 > 0 && v2 >= 0 && v2 <= 10000) tryPow(i, j, v1, v2);
+          if (i !== j && v2 > 0 && v1 >= 0 && v1 <= 10000) tryPow(j, i, v2, v1);
+
+          if (v1 > 0 && v2 > 0 && v1 <= MAX_VAL / Math.max(v2, 1)) {
+            const prod = v1 * v2;
+            const sq = Math.round(Math.sqrt(prod));
+            if (sq * sq === prod && sq <= MAX_VAL)
+              ins(sq, OP.SQRTMUL, i, j, v1, v2, 0);
+          }
+        }
+      }
+    }
+
+    // Unary ops (BFS fixpoint)
+    let frontier = [...sets[n].keys()];
+    for (let round = 0; round < 6 && frontier.length; round++) {
+      const next = [];
+      for (const val of frontier) {
+        const d = sets[n].get(val);
+        if (!d) continue;
+        const { nc, dp } = d;
+        const uins = (v, op, a, ncx) => {
+          if (Math.abs(v) > MAX_VAL) return false;
+          const sc = (nc + ncx) * 1000 + dp + 1;
+          const ex = sets[n].get(v);
+          if (ex && ex.nc * 1000 + ex.dp <= sc) return false;
+          if (!ex && sets[n].size >= MAX_SET) return false;
+          sets[n].set(v, { op, sa: n, sb: 0, a, b: 0, nc: nc + ncx, dp: dp + 1 });
+          return true;
+        };
+
+        if (val > 0) {
+          const sq = Math.round(Math.sqrt(val));
+          if (sq * sq === val && sq > 0 && sq < MAX_VAL)
+            if (uins(sq, OP.SQRT, val, 0)) next.push(sq);
+        }
+        if (val >= 3 && val <= 12) {
+          const f = FACT_TABLE[val];
+          if (f <= MAX_VAL && uins(f, OP.FACT, val, 0)) next.push(f);
+        }
+        if (val > 0 && uins(-val, OP.NEG, val, 1)) next.push(-val);
+      }
+      frontier = next;
+    }
+
+    if (onProgress) onProgress(n, sets[n].size);
+
+    if (sets[n].has(target)) {
+      return {
+        found: true, digits: n,
+        latex: toLatex(target, n, sets),
+        stats: Array.from({ length: n }, (_, i) => [i + 1, sets[i + 1].size])
+      };
+    }
+  }
+
+  return {
+    found: false, digits: maxDigits, latex: '',
+    stats: Array.from({ length: maxDigits }, (_, i) => [i + 1, sets[i + 1]?.size || 0])
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+//  LATEX RECONSTRUCTION
+// ═══════════════════════════════════════════════════════════
+
+function toLatex(val, n, sets) {
+  const d = sets[n].get(val);
+  if (!d) return String(val);
+
+  const needsParens = (v, setN, parentOp, isRight) => {
+    const cd = sets[setN].get(v);
+    if (!cd) return false;
+    const childOp = cd.op;
+    if (childOp === OP.CONCAT || childOp === OP.FACT || childOp === OP.SQRT ||
+        childOp === OP.SQRTMUL || (childOp >= OP.POWRT1 && childOp <= OP.POWRT5))
+      return false;
+    if (childOp === OP.NEG) return true;
+
+    const prec = op => {
+      if (op === OP.ADD || op === OP.SUB) return 1;
+      if (op === OP.MUL || op === OP.DIV) return 2;
+      if (op === OP.POW) return 3;
+      return 10;
+    };
+    const cp = prec(childOp), pp = prec(parentOp);
+    if (cp < pp) return true;
+    if (cp === pp && isRight && (parentOp === OP.SUB || parentOp === OP.DIV)) return true;
+    return false;
+  };
+
+  const wrap = (s, cond) => cond ? `\\left(${s}\\right)` : s;
+
+  switch (d.op) {
+    case OP.CONCAT:
+      return String(val);
+
+    case OP.ADD: case OP.SUB: {
+      const l = toLatex(d.a, d.sa, sets);
+      const r = toLatex(d.b, d.sb, sets);
+      const op = d.op === OP.ADD ? ' + ' : ' - ';
+      return wrap(l, needsParens(d.a, d.sa, d.op, false))
+           + op
+           + wrap(r, needsParens(d.b, d.sb, d.op, true));
+    }
+
+    case OP.MUL: {
+      const l = toLatex(d.a, d.sa, sets);
+      const r = toLatex(d.b, d.sb, sets);
+      return wrap(l, needsParens(d.a, d.sa, d.op, false))
+           + ' \\times '
+           + wrap(r, needsParens(d.b, d.sb, d.op, true));
+    }
+
+    case OP.DIV: {
+      const l = toLatex(d.a, d.sa, sets);
+      const r = toLatex(d.b, d.sb, sets);
+      return `\\dfrac{${l}}{${r}}`;
+    }
+
+    case OP.POW: {
+      const l = toLatex(d.a, d.sa, sets);
+      const r = toLatex(d.b, d.sb, sets);
+      const ld = sets[d.sa].get(d.a);
+      const wrapBase = ld && (ld.op === OP.ADD || ld.op === OP.SUB ||
+                              ld.op === OP.MUL || ld.op === OP.DIV || ld.op === OP.NEG);
+      return (wrapBase ? `\\left(${l}\\right)` : l) + `^{${r}}`;
+    }
+
+    case OP.SQRT:
+      return `\\sqrt{${toLatex(d.a, n, sets)}}`;
+
+    case OP.SQRTMUL: {
+      const l = toLatex(d.a, d.sa, sets);
+      const r = toLatex(d.b, d.sb, sets);
+      return `\\sqrt{${l} \\times ${r}}`;
+    }
+
+    case OP.FACT: {
+      const inner = toLatex(d.a, n, sets);
+      const id = sets[n].get(d.a);
+      if (id && (id.op === OP.CONCAT || id.op === OP.FACT))
+        return `${inner}!`;
+      return `\\left(${inner}\\right)!`;
+    }
+
+    case OP.NEG: {
+      const inner = toLatex(d.a, n, sets);
+      const id = sets[n].get(d.a);
+      if (id && (id.op === OP.CONCAT || id.op === OP.SQRT || id.op === OP.FACT))
+        return `-${inner}`;
+      return `-\\left(${inner}\\right)`;
+    }
+
+    default:
+      // POWRT1..5
+      if (d.op >= OP.POWRT1 && d.op <= OP.POWRT5) {
+        const k = d.op - OP.POWRT1 + 1;
+        const rootN = Math.pow(2, k);
+        const base = toLatex(d.a, d.sa, sets);
+        const exp = toLatex(d.b, d.sb, sets);
+        const bd = sets[d.sa].get(d.a);
+        const wrapBase = bd && (bd.op === OP.ADD || bd.op === OP.SUB ||
+                                bd.op === OP.MUL || bd.op === OP.DIV || bd.op === OP.NEG);
+        const inner = (wrapBase ? `\\left(${base}\\right)` : base) + `^{${exp}}`;
+        if (rootN === 2) return `\\sqrt{${inner}}`;
+        return `\\sqrt[${rootN}]{${inner}}`;
+      }
+      return String(val);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  UI RENDERING
+// ═══════════════════════════════════════════════════════════
+
+let state = {
+  digit: null,
+  target: '',
+  maxDigits: 8,
+  result: null,
+  solving: false,
+  progress: null,
+  history: []
+};
+
+function render() {
+  const app = document.getElementById('app');
+
+  let html = `
+    <header>
+      <h1>Tchisel</h1>
+      <p>Tchisla Solver</p>
+    </header>
+
+    <div class="section-label">Choose your digit</div>
+    <div class="digit-grid">
+      ${[1,2,3,4,5,6,7,8,9].map(d => `
+        <button class="digit-btn ${state.digit === d ? 'active' : ''}"
+                onclick="selectDigit(${d})">${d}</button>
+      `).join('')}
+    </div>
+  `;
+
+  if (state.digit) {
+    html += `
+      <div class="section-label">Target number</div>
+      <div class="input-row">
+        <input type="number" class="target-input" id="targetInput"
+               value="${state.target}" placeholder="e.g. 1729"
+               oninput="state.target=this.value" onkeydown="if(event.key==='Enter')doSolve()">
+        <select class="max-select" onchange="state.maxDigits=+this.value">
+          ${[4,5,6,7,8,9].map(n =>
+            `<option value="${n}" ${state.maxDigits===n?'selected':''}>max ${n}</option>`
+          ).join('')}
+        </select>
+      </div>
+
+      <div class="section-label">Try these</div>
+      <div class="quick-picks">
+        ${[100, 1024, 1729, 42, 256, 365, 720, 2025].map(n => `
+          <button class="quick-btn" onclick="pickTarget(${n})">${n}</button>
+        `).join('')}
+      </div>
+
+      <button class="solve-btn" onclick="doSolve()"
+              ${state.solving || !state.target ? 'disabled' : ''}>
+        ${state.solving ? 'Conjuring...' : 'Solve'}
+      </button>
+    `;
+  }
+
+  if (state.solving && state.progress) {
+    html += `
+      <div class="progress-bar">
+        Exploring ${state.progress.n} digit${state.progress.n>1?'s':''}…
+        <span>${state.progress.size.toLocaleString()}</span> values
+      </div>
+    `;
+  }
+
+  if (state.result) {
+    const r = state.result;
+    html += `
+      <div class="result-card ${r.found ? 'success' : 'fail'}">
+        ${r.found ? `
+          <div class="result-badge">Solution found — ${r.digits} digit${r.digits>1?'s':''}</div>
+          <div class="result-formula" id="formula"></div>
+        ` : `
+          <div class="result-badge">No solution within ${state.maxDigits} digits</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--red)">
+            Try increasing the max digit limit.
+          </div>
+        `}
+        <div class="result-stats">
+          ${r.stats.map(([n, sz]) => `S[${n}]:${sz.toLocaleString()}`).join(' &nbsp; ')}
+        </div>
+      </div>
+    `;
+  }
+
+  if (state.history.length) {
+    html += `<div class="section-label" style="margin-top:16px">Grimoire</div>`;
+    for (const h of state.history) {
+      html += `
+        <div class="history-item" onclick="rerun(${h.target},${h.digit})">
+          <div>
+            <span class="target">${h.target}</span>
+            <span class="meta"> using ${h.digit}s</span>
+          </div>
+          <span class="digits-badge">${h.digits} digit${h.digits>1?'s':''}</span>
+        </div>
+      `;
+    }
+  }
+
+  app.innerHTML = html;
+
+  // Render KaTeX formula
+  if (state.result && state.result.found) {
+    const el = document.getElementById('formula');
+    if (el) {
+      try {
+        katex.render(
+          `${state.target} = ${state.result.latex}`,
+          el,
+          { displayMode: true, throwOnError: false, trust: true }
+        );
+      } catch(e) {
+        el.textContent = state.result.latex;
+      }
+    }
+  }
+}
+
+function selectDigit(d) {
+  state.digit = d;
+  state.result = null;
+  render();
+  const inp = document.getElementById('targetInput');
+  if (inp) inp.focus();
+}
+
+function pickTarget(n) {
+  state.target = String(n);
+  state.result = null;
+  render();
+}
+
+function rerun(target, digit) {
+  state.digit = digit;
+  state.target = String(target);
+  state.result = null;
+  render();
+  setTimeout(doSolve, 100);
+}
+
+function doSolve() {
+  if (!state.digit || !state.target) return;
+  const t = parseInt(state.target);
+  if (isNaN(t) || t === 0) return;
+
+  state.solving = true;
+  state.result = null;
+  state.progress = null;
+  render();
+
+  setTimeout(() => {
+    const res = solve(state.digit, t, state.maxDigits, (n, size) => {
+      state.progress = { n, size };
+      // Don't render during solve — too slow
+    });
+
+    state.result = res;
+    state.solving = false;
+    state.progress = null;
+
+    if (res.found) {
+      state.history = [
+        { target: t, digit: state.digit, digits: res.digits },
+        ...state.history.filter(h => !(h.target === t && h.digit === state.digit)).slice(0, 19)
+      ];
+    }
+
+    render();
+  }, 50);
+}
+
+// Initial render
+render();
+</script>
+</body>
+</html>

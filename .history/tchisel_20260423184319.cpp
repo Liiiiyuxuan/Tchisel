@@ -7,7 +7,7 @@
 // ║  Tree-based: stores derivation records (~40 bytes) ║
 // ║  instead of expression strings (~200+ bytes).      ║
 // ║  Reconstructs expressions on demand.               ║
-// ╚════════════════════════════════════════════════════╝
+// ╚══════════════════════════════════════════════════╝
 
 #include <iostream>
 #include <unordered_map>

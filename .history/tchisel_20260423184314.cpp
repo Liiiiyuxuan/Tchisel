@@ -1,13 +1,13 @@
 // ╔════════════════════════════════════════════════════╗
 // ║  TCHISEL — Tchisla Solver (v2)                     ║
 // ║  Express any number using a single digit           ║
-// ║  Compile: g++ -std=c++17 -O2 -o tchisel tchisel.cpp║
+// ║  Compile: g++ -std=c++17 -O2 -o tchisel tchisel.cpp           ║
 // ║  Usage:   ./tchisel <digit> <target> [max_digits]  ║
 // ║                                                    ║
-// ║  Tree-based: stores derivation records (~40 bytes) ║
-// ║  instead of expression strings (~200+ bytes).      ║
-// ║  Reconstructs expressions on demand.               ║
-// ╚════════════════════════════════════════════════════╝
+// ║  Tree-based: stores derivation records (~40 bytes)  ║
+// ║  instead of expression strings (~200+ bytes).       ║
+// ║  Reconstructs expressions on demand.                ║
+// ╚══════════════════════════════════════════════════╝
 
 #include <iostream>
 #include <unordered_map>

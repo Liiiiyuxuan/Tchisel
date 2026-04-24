@@ -1,13 +1,13 @@
-// ╔════════════════════════════════════════════════════╗
-// ║  TCHISEL — Tchisla Solver (v2)                     ║
+// ╔══════════════════════════════════════════════════╗
+// ║  TCHISEL — Tchisla Solver (v2)                    ║
 // ║  Express any number using a single digit           ║
-// ║  Compile: g++ -std=c++17 -O2 -o tchisel tchisel.cpp║
+// ║  Compile: g++ -std=c++17 -O2 -o tchisel tchisel.cpp           ║
 // ║  Usage:   ./tchisel <digit> <target> [max_digits]  ║
 // ║                                                    ║
-// ║  Tree-based: stores derivation records (~40 bytes) ║
-// ║  instead of expression strings (~200+ bytes).      ║
-// ║  Reconstructs expressions on demand.               ║
-// ╚════════════════════════════════════════════════════╝
+// ║  Tree-based: stores derivation records (~40 bytes)  ║
+// ║  instead of expression strings (~200+ bytes).       ║
+// ║  Reconstructs expressions on demand.                ║
+// ╚══════════════════════════════════════════════════╝
 
 #include <iostream>
 #include <unordered_map>
@@ -53,7 +53,7 @@ struct Deriv {
     int score() const { return neg_count * 1000 + depth; }
 };
 
-unordered_map<long long, Deriv> sets[10];
+unordered_map<long long, Deriv> sets[13];
 
 long long factorial_table[21];
 
@@ -218,7 +218,7 @@ struct Result {
 
 Result solve(int digit, long long target, int max_digits) {
     precompute_factorials();
-    for (int i = 0; i <= 9; i++) sets[i].clear();
+    for (int i = 0; i <= 12; i++) sets[i].clear();
 
     for (int n = 1; n <= max_digits; n++) {
         // Concatenation
@@ -369,8 +369,8 @@ int main(int argc, char* argv[]) {
         cerr << "Error: target must be nonzero" << endl;
         return 1;
     }
-    if (max_digits < 1 || max_digits > 9) {
-        cerr << "Error: max digits must be 1-9" << endl;
+    if (max_digits < 1 || max_digits > 12) {
+        cerr << "Error: max digits must be 1-12" << endl;
         return 1;
     }
 
