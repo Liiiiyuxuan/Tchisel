@@ -14,9 +14,9 @@ from urllib.parse import urlparse, parse_qs
 
 BASE_DIR = Path(__file__).resolve().parent
 
-ORIGINAL_EXECUTABLE = BASE_DIR / 'tchiselO'
-RATIONAL_EXECUTABLE = BASE_DIR / 'tchiselRO'
-IRRATIONAL_EXECUTABLE = BASE_DIR / 'tchiselMR'
+ORIGINAL_EXECUTABLE = BASE_DIR / 'tchisel'
+RATIONAL_EXECUTABLE = BASE_DIR / 'tchisel_rational'
+IRRATIONAL_EXECUTABLE = BASE_DIR / 'tchisel_irrational'
 
 HTML_FILE = BASE_DIR / 'main.html'
 HOST = '127.0.0.1'
@@ -383,12 +383,6 @@ def eval_ast(node):
 
 
 def evaluate_formula(expr: str):
-    # Auto-close unbalanced parens
-    opens = expr.count('(')
-    closes = expr.count(')')
-    if opens > closes:
-        expr = expr + ')' * (opens - closes)
-
     tokens = tokenize(expr)
     ast = Parser(tokens).parse()
     return eval_ast(ast)
@@ -406,30 +400,16 @@ def formula_matches_digit(expr: str, digit: int, count: int) -> bool:
 
 
 def pick_valid_formula(text: str, digit: int, target: int, count: int):
-    candidates = extract_formula_candidates(text)
-    if not candidates:
-        print(f'  [validate] no formula candidates found in solver output')
-        return None
-
-    for cand in candidates:
+    for cand in extract_formula_candidates(text):
         try:
             if not formula_matches_digit(cand, digit, count):
-                num_tokens = re.findall(r'\d+', cand)
-                total = sum(len(tok) for tok in num_tokens)
-                wrong_digits = [tok for tok in num_tokens if set(tok) != {str(digit)}]
-                print(f'  [validate] digit check failed: need {count}×{digit}, got {total} digits, wrong tokens={wrong_digits}')
                 continue
 
             value = evaluate_formula(cand)
-            diff = abs(value - target)
 
-            if diff < 0.5:  # wider tolerance for float accumulation through irrationals
-                print(f'  [validate] ✓ formula valid: {cand[:60]}... eval={value} diff={diff:.2e}')
+            if abs(value - target) < 1e-7:
                 return cand
-            else:
-                print(f'  [validate] eval mismatch: expected {target}, got {value} (diff={diff:.2e})')
-        except Exception as e:
-            print(f'  [validate] eval error: {e} | formula: {cand[:60]}...')
+        except Exception:
             continue
 
     return None
@@ -612,12 +592,10 @@ def _prune_jobs_locked():
 
 
 def publish_solver_result(job_id: str, result: dict):
-    source = result.get('source', '?')
     with _jobs_lock:
         job = _jobs.get(job_id)
 
         if not job or job.get('status') == 'cancelled':
-            print(f'[{source}] job cancelled, discarding result')
             return
 
         job.setdefault('candidates', []).append(result)
@@ -626,17 +604,10 @@ def publish_solver_result(job_id: str, result: dict):
         current_best = job.get('best')
 
         if is_better(result, current_best):
-            old_digits = current_best.get('digits', '?') if current_best and current_best.get('found') else 'none'
-            new_digits = result.get('digits', '?')
-            print(f'[{source}] ★ new best! {old_digits} → {new_digits} digits')
             job['best'] = result
             job['improved'] = True
             job['message'] = 'a better solution is found'
             job['improvementVersion'] = int(job.get('improvementVersion', 0)) + 1
-        else:
-            best = current_best
-            best_d = best.get('digits', '?') if best and best.get('found') else 'none'
-            print(f'[{source}] not better (current best: {best_d} digits)')
 
         job['finishedCount'] = int(job.get('finishedCount', 0)) + 1
 
@@ -644,42 +615,26 @@ def publish_solver_result(job_id: str, result: dict):
             job['status'] = 'done'
             job['stage'] = ''
             job['finished_at'] = time.time()
-            print(f'[job] all solvers finished. best: {job["best"].get("digits") if job.get("best") and job["best"].get("found") else "none"} digits from {job["best"].get("source") if job.get("best") else "?"}')
 
 
 def run_solver_for_job(job_id: str, solver: dict, digit: int, target: int, requested_max_digits: int):
-    source = solver['source']
-    print(f'[{source}] starting: digit={digit} target={target} max={solver["max_digits"]} exe={solver["exe"]}')
-
     with _jobs_lock:
         job = _jobs.get(job_id)
+
         if job and job.get('status') != 'cancelled':
-            job['stage'] = source
+            job['stage'] = solver['source']
 
     result = run_solver(
         solver['exe'],
         digit,
         target,
         solver['max_digits'],
-        source,
+        solver['source'],
         solver['timeout'],
     )
 
     result['requestedMaxDigits'] = requested_max_digits
     result['actualMaxDigits'] = solver['max_digits']
-
-    found = result.get('found', False)
-    digits = result.get('digits', '?')
-    formula = result.get('formula', '')[:80]
-    error = result.get('error', '')
-    msg = result.get('message', '')[:100]
-
-    if found:
-        print(f'[{source}] ✓ SOLVED in {digits} digit(s): {formula}')
-    elif error:
-        print(f'[{source}] ✗ error={error}: {msg}')
-    else:
-        print(f'[{source}] ✗ no solution found: {msg}')
 
     publish_solver_result(job_id, result)
 
@@ -906,12 +861,6 @@ class Handler(BaseHTTPRequestHandler):
         payload['backgroundRunning'] = running
         payload['backgroundMessage'] = ''
         payload['version'] = version
-
-        # Log what we're returning
-        found = payload.get('found')
-        digits = payload.get('digits')
-        source = payload.get('source', '?')
-        print(f'[response] returning: found={found} digits={digits} from={source} background_running={running}')
 
         self._send_json(200, payload)
 

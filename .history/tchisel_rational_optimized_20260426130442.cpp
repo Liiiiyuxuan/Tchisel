@@ -248,15 +248,11 @@ string reconstruct(const Rat& val, int n) {
 bool try_insert(int n, const Rat& val, const Deriv& d) {
     auto it = sets[n].find(val);
     if (it != sets[n].end()) {
-        if (d.score() < it->second.score()) {
-            it->second = d;
-            return true;
-        }
+        if (d.score() < it->second.score()) { it->second = d; return true; }
         return false;
     }
-
     if ((int)sets[n].size() >= MAX_SET_SIZE) return false;
-    sets[n][val] = d;
+    sets[n].emplace(val, d);
     return true;
 }
 
@@ -329,6 +325,12 @@ Result solve(int digit, long long target, int max_digits) {
     Rat target_rat = make_int(target);
 
     for (int n = 1; n <= max_digits; n++) {
+        // Pre-reserve to avoid rehashing
+        size_t prev = n > 1 ? sets[n-1].size() : 0;
+        size_t expected = min((size_t)MAX_SET_SIZE, max(prev * 8, (size_t)1024));
+        sets[n].reserve(expected);
+        sets[n].max_load_factor(0.7f);
+
         // Concatenation
         long long concat = 0;
         for (int k = 0; k < n; k++) concat = concat * 10 + digit;
@@ -451,6 +453,64 @@ Result solve(int digit, long long target, int max_digits) {
         if (sets[n].count(target_rat)) {
             return {true, n, reconstruct(target_rat, n)};
         }
+
+        // Target-aware finishing: check if target is 1-2 ops away from S[n]
+        if (n + 1 == max_digits) {
+            long long d = digit;
+            // target = x + d → x = target - d
+            if (auto it = sets[n].find(make_int(target - d)); it != sets[n].end())
+                return {true, n+1, "(" + reconstruct(it->first, n) + " + " + to_string(d) + ")"};
+            // target = x - d
+            if (auto it = sets[n].find(make_int(target + d)); it != sets[n].end())
+                return {true, n+1, "(" + reconstruct(it->first, n) + " - " + to_string(d) + ")"};
+            // target = d - x
+            if (auto it = sets[n].find(make_int(d - target)); it != sets[n].end())
+                return {true, n+1, "(" + to_string(d) + " - " + reconstruct(it->first, n) + ")"};
+            // target = x * d
+            if (d != 0 && target % d == 0)
+                if (auto it = sets[n].find(make_int(target / d)); it != sets[n].end())
+                    return {true, n+1, "(" + reconstruct(it->first, n) + " * " + to_string(d) + ")"};
+            // target = x / d → x = target * d
+            if (auto it = sets[n].find(make_int(target * d)); it != sets[n].end())
+                return {true, n+1, "(" + reconstruct(it->first, n) + " / " + to_string(d) + ")"};
+            // target = d / x → x = d / target (rational)
+            { Rat x; if (make_rat(d, target, x))
+                if (auto it = sets[n].find(x); it != sets[n].end())
+                    return {true, n+1, "(" + to_string(d) + " / " + reconstruct(it->first, n) + ")"}; }
+            // target = x!
+            for (int f = 3; f <= 12; f++)
+                if (factorial_table[f] == target)
+                    if (auto it = sets[n].find(make_int(f)); it != sets[n].end())
+                        return {true, n+1, "(" + reconstruct(make_int(f), n) + ")!"};
+            // target = sqrt(x)
+            if (auto it = sets[n].find(make_int(target * target)); it != sets[n].end())
+                return {true, n+1, "sqrt(" + reconstruct(it->first, n) + ")"};
+            // target = -x
+            if (auto it = sets[n].find(make_int(-target)); it != sets[n].end())
+                return {true, n+1, "-(" + reconstruct(it->first, n) + ")"};
+        }
+        if (n + 2 == max_digits) {
+            long long d = digit;
+            struct { const char* fmt; long long x; } checks[] = {
+                {"((%s + %lld) / %lld)", target * d - d},
+                {"((%s - %lld) / %lld)", target * d + d},
+                {"((%s * %lld) + %lld)", d != 0 && (target - d) % d == 0 ? (target - d) / d : MAX_VAL + 1},
+                {"((%s * %lld) - %lld)", d != 0 && (target + d) % d == 0 ? (target + d) / d : MAX_VAL + 1},
+                {"((%s / %lld) + %lld)", (target - d) * d},
+                {"((%s / %lld) - %lld)", (target + d) * d},
+                {"((%s + %lld) * %lld)", d != 0 && target % d == 0 ? target / d - d : MAX_VAL + 1},
+                {"((%s - %lld) * %lld)", d != 0 && target % d == 0 ? target / d + d : MAX_VAL + 1},
+            };
+            for (auto& [fmt, x] : checks) {
+                if (llabs(x) <= MAX_VAL) {
+                    if (auto it = sets[n].find(make_int(x)); it != sets[n].end()) {
+                        char buf[512];
+                        snprintf(buf, sizeof(buf), fmt, reconstruct(make_int(x), n).c_str(), d, d);
+                        return {true, n+2, string(buf)};
+                    }
+                }
+            }
+        }
     }
 
     return {false, max_digits, ""};
@@ -501,4 +561,4 @@ int main(int argc, char* argv[]) {
     }
 
     return 0;
-}
+}Z

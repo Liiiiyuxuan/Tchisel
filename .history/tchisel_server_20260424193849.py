@@ -13,18 +13,22 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 BASE_DIR = Path(__file__).resolve().parent
+
 ORIGINAL_EXECUTABLE = BASE_DIR / 'tchisel'
-RATIONAL_EXECUTABLE = BASE_DIR / 'tchiselR'
-HTML_FILE = BASE_DIR / 'main_new.html'
+RATIONAL_EXECUTABLE = BASE_DIR / 'tchisel_rational'
+IRRATIONAL_EXECUTABLE = BASE_DIR / 'tchisel_irrational'
+
+HTML_FILE = BASE_DIR / 'main.html'
 HOST = '127.0.0.1'
 PORT = 8080
 EPS = 1e-9
+
 PRIMARY_TIMEOUT = 300
 BACKGROUND_TIMEOUT = 300
-# The rational solver currently stores sets[0..9], so passing 10/11/12 makes it exit.
-# The UI's "no limit" is represented as 12 for the original solver, but tchiselR
-# should be capped at 9 unless you later expand its C++ arrays.
+
+# These caps prevent "no limit" = 12 from crashing solvers that only support smaller tables.
 RATIONAL_MAX_DIGITS = 9
+IRRATIONAL_MAX_DIGITS = 9
 
 _proc_lock = threading.Lock()
 _running_procs = {}
@@ -81,15 +85,29 @@ def find_executable(kind='original'):
     if kind == 'rational':
         candidates = [
             RATIONAL_EXECUTABLE,
+            BASE_DIR / 'tchiselR',
             BASE_DIR / 'tchisel_rational',
             BASE_DIR / 'tchiselR.exe',
+            BASE_DIR / 'tchisel_rational.exe',
+        ]
+    elif kind == 'irrational':
+        candidates = [
+            IRRATIONAL_EXECUTABLE,
+            BASE_DIR / 'tchiselI',
+            BASE_DIR / 'tchisel_symbolic',
+            BASE_DIR / 'tchisel_irrational',
+            BASE_DIR / 'tchiselI.exe',
+            BASE_DIR / 'tchisel_symbolic.exe',
+            BASE_DIR / 'tchisel_irrational.exe',
         ]
     else:
         candidates = [
             ORIGINAL_EXECUTABLE,
             BASE_DIR / 'solver',
             BASE_DIR / 'tchisla_solver',
+            BASE_DIR / 'tchisel.exe',
         ]
+
     for c in candidates:
         if c.exists() and os.access(c, os.X_OK) and c.is_file():
             return c
@@ -432,45 +450,75 @@ def _prune_jobs_locked():
 
 
 def background_solve(job_id: str, digit: int, target: int, max_digits: int, incumbent: dict):
-    rational_max_digits = min(max_digits, RATIONAL_MAX_DIGITS)
+    best = dict(incumbent)
+
+    background_passes = [
+        {
+            'kind': 'rational',
+            'source': 'tchisel_rational',
+            'exe': find_executable('rational'),
+            'max_digits': min(max_digits, RATIONAL_MAX_DIGITS),
+        },
+        {
+            'kind': 'irrational',
+            'source': 'tchisel_irrational',
+            'exe': find_executable('irrational'),
+            'max_digits': min(max_digits, IRRATIONAL_MAX_DIGITS),
+        },
+    ]
 
     with _jobs_lock:
         job = _jobs.get(job_id)
         if job:
             job['status'] = 'running'
             job['message'] = ''
+            job['best'] = best
+            job['candidate'] = None
+            job['candidates'] = []
+            job['improvementVersion'] = 0
 
-    result = run_solver(
-        find_executable('rational'),
-        digit,
-        target,
-        rational_max_digits,
-        'tchiselR',
-        BACKGROUND_TIMEOUT,
-    )
+    for solver in background_passes:
+        with _jobs_lock:
+            job = _jobs.get(job_id)
+            if not job or job.get('status') == 'cancelled':
+                return
+            job['stage'] = solver['source']
 
-    # Make the cap visible in the JSON/debug text so the UI does not look mysterious.
-    result['requestedMaxDigits'] = max_digits
-    result['actualMaxDigits'] = rational_max_digits
+        result = run_solver(
+            solver['exe'],
+            digit,
+            target,
+            solver['max_digits'],
+            solver['source'],
+            BACKGROUND_TIMEOUT,
+        )
+
+        result['requestedMaxDigits'] = max_digits
+        result['actualMaxDigits'] = solver['max_digits']
+
+        with _jobs_lock:
+            job = _jobs.get(job_id)
+            if not job or job.get('status') == 'cancelled':
+                return
+
+            job['candidate'] = result
+            job.setdefault('candidates', []).append(result)
+
+            if is_better(result, best):
+                best = result
+                job['best'] = best
+                job['improved'] = True
+                job['message'] = 'a better solution is found'
+                job['improvementVersion'] = int(job.get('improvementVersion', 0)) + 1
+            else:
+                job['best'] = best
 
     with _jobs_lock:
         job = _jobs.get(job_id)
-        if not job:
-            return
-        job['candidate'] = result
-        if is_better(result, incumbent):
-            job['best'] = result
-            job['improved'] = True
-            job['message'] = 'a better solution is found'
-        else:
-            job['best'] = incumbent
-            job['improved'] = False
-            if result.get('found'):
-                job['message'] = ''
-            else:
-                job['message'] = ''
-        job['status'] = 'done'
-        job['finished_at'] = time.time()
+        if job:
+            job['status'] = 'done'
+            job['stage'] = ''
+            job['finished_at'] = time.time()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -504,13 +552,18 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/health':
             original = find_executable('original')
             rational = find_executable('rational')
+            irrational = find_executable('irrational')
+
             self._send_json(200, {
                 'ok': True,
                 'originalExecutable': str(original),
                 'originalExists': original.exists() and os.access(original, os.X_OK),
                 'rationalExecutable': str(rational),
                 'rationalExists': rational.exists() and os.access(rational, os.X_OK),
+                'irrationalExecutable': str(irrational),
+                'irrationalExists': irrational.exists() and os.access(irrational, os.X_OK),
                 'rationalMaxDigits': RATIONAL_MAX_DIGITS,
+                'irrationalMaxDigits': IRRATIONAL_MAX_DIGITS,
                 'html': str(HTML_FILE),
             })
             return

@@ -16,7 +16,7 @@ BASE_DIR = Path(__file__).resolve().parent
 
 ORIGINAL_EXECUTABLE = BASE_DIR / 'tchiselO'
 RATIONAL_EXECUTABLE = BASE_DIR / 'tchiselRO'
-IRRATIONAL_EXECUTABLE = BASE_DIR / 'tchiselMR'
+IRRATIONAL_EXECUTABLE = BASE_DIR / 'tchisel_irrational'
 
 HTML_FILE = BASE_DIR / 'main.html'
 HOST = '127.0.0.1'

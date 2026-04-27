@@ -642,6 +642,7 @@ let state = {
     backgroundChecking: false,
     backgroundJobId: null,
     backgroundMessage: '',
+    backgroundVersion: 0,
     progress: null,
     history: [],
     error: '',
@@ -1109,6 +1110,7 @@ function stopSolve() {
     state.backgroundChecking = false;
     state.backgroundJobId = null;
     state.backgroundMessage = '';
+    state.backgroundVersion = 0;
     state.progress = null;
     render();
 }

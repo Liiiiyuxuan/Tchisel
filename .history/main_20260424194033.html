@@ -268,83 +268,6 @@ header p {
     gap: 12px;
 }
 
-
-/* ─── Copy controls ─── */
-.result-copy {
-    position: absolute;
-    top: 18px;
-    right: 18px;
-    z-index: 5;
-}
-
-.copy-icon-btn {
-    width: 34px;
-    height: 34px;
-    border: none;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--green);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
-}
-
-.copy-icon-btn:hover {
-    background: #9ece6a22;
-    color: var(--green);
-    transform: translateY(-1px);
-}
-
-.copy-icon-btn:active {
-    transform: translateY(0);
-    background: #9ece6a33;
-}
-
-.copy-icon-btn:focus-visible {
-    outline: 2px solid var(--green);
-    outline-offset: 2px;
-}
-
-.copy-icon-btn svg {
-    width: 22px;
-    height: 22px;
-    stroke: currentColor;
-    stroke-width: 2;
-    fill: none;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-}
-
-.copy-status {
-    position: absolute;
-    top: 58px;
-    right: 20px;
-    min-height: 16px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    letter-spacing: 1px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    z-index: 4;
-}
-
-.copy-status.ok { color: var(--green); }
-.copy-status.fail { color: var(--red); }
-
-[data-theme="light"] .copy-icon-btn {
-    background: transparent;
-}
-
-[data-theme="light"] .copy-icon-btn:hover {
-    background: #16a34a18;
-}
-
-[data-theme="light"] .copy-icon-btn:active {
-    background: #16a34a26;
-}
-
 /* ─── Progress ─── */
 .progress-bar {
     padding: 14px 16px;
@@ -720,7 +643,6 @@ let state = {
     backgroundJobId: null,
     backgroundMessage: '',
     backgroundVersion: 0,
-    backgroundStage: '',
     progress: null,
     history: [],
     error: '',
@@ -923,11 +845,7 @@ function formulaAstToLatex(node, parentPrec = 0, side = 'none') {
         case 'pow': {
             const bp = precedence(node.base);
             const base = formulaAstToLatex(node.base, 80, 'left');
-
-            // Do not use display-style fractions inside exponents.
-            const exp = formulaAstToLatex(node.exp, 0, 'none')
-                .replaceAll('\\dfrac', '\\frac');
-
+            const exp = formulaAstToLatex(node.exp, 0, 'none');
             return `${wrap(base, bp < 80)}^{${exp}}`;
         }
         case 'neg': {
@@ -962,67 +880,6 @@ function formulaToLatex(formula) {
         return formulaAstToLatex(ast);
     } catch (e) {
         return '';
-    }
-}
-
-
-function currentRawFormulaText() {
-    if (!state.result || !state.result.found || !state.result.formula) return '';
-    return `${state.target} = ${state.result.formula}`;
-}
-
-function currentLatexText() {
-    if (!state.result || !state.result.found) return '';
-    const derivedLatex = formulaToLatex(state.result.formula || '');
-    const latex = derivedLatex || state.result.latex || '';
-    if (!latex) return currentRawFormulaText();
-    return `${state.target} = ${latex}`;
-}
-
-async function copyText(text) {
-    if (!text) throw new Error('Nothing to copy');
-
-    if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(text);
-        return;
-    }
-
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.setAttribute('readonly', '');
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    ta.style.left = '-9999px';
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand('copy');
-    document.body.removeChild(ta);
-    if (!ok) throw new Error('Copy failed');
-}
-
-function showCopyStatus(message, ok = true) {
-    const el = document.getElementById('copyStatus');
-    if (!el) return;
-    el.textContent = message;
-    el.className = `copy-status ${ok ? 'ok' : 'fail'}`;
-
-    clearTimeout(showCopyStatus._timer);
-    showCopyStatus._timer = setTimeout(() => {
-        const current = document.getElementById('copyStatus');
-        if (current) {
-            current.textContent = '';
-            current.className = 'copy-status';
-        }
-    }, 1400);
-}
-
-async function copyLatexResult(event) {
-    event.stopPropagation();
-    try {
-        await copyText(currentLatexText());
-        showCopyStatus('copied LaTeX');
-    } catch (_) {
-        showCopyStatus('copy failed', false);
     }
 }
 
@@ -1100,15 +957,6 @@ function render() {
         html += `
             <div class="result-card ${r.found ? 'success' : 'fail'}">
                 ${r.found ? `
-                    <div class="result-copy">
-                        <button class="copy-icon-btn" type="button" title="Copy LaTeX" aria-label="Copy LaTeX" onclick="copyLatexResult(event)">
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                                <rect x="8" y="8" width="12" height="12" rx="2"></rect>
-                                <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path>
-                            </svg>
-                        </button>
-                    </div>
-                    <div class="copy-status" id="copyStatus" aria-live="polite"></div>
                     <div class="result-badge">
                         Solution found — ${r.digits} digit${r.digits>1?'s':''}
                     </div>
@@ -1128,18 +976,13 @@ function render() {
                     </details>
                 ` : ''}
                 ${state.backgroundMessage ? `
-                    <div style="margin-top:10px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--gold);line-height:1.6">
+                    <div style="margin-top:10px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);line-height:1.6">
                         ${escapeHtml(state.backgroundMessage)}
                     </div>
                 ` : ''}
                 <div class="result-stats">
                     ${(r.stats?.length ? r.stats : [[r.digits, 0]]).map(([n, sz]) => `S[${n}]:${Number(sz).toLocaleString()}`).join(' &nbsp; ')}
                 </div>
-                ${state.backgroundChecking ? `
-                    <div data-bg-stage style="margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);letter-spacing:0.5px">
-                        ⟳ ${escapeHtml(state.backgroundStage || 'background')} running…
-                    </div>
-                ` : ''}
             </div>
         `;
     }
@@ -1224,10 +1067,6 @@ function selectDigit(d) {
     state.digit = d;
     state.result = null;
     state.error = '';
-    state.backgroundChecking = false;
-    state.backgroundStage = '';
-    state.backgroundMessage = '';
-    currentPollToken++;
     render();
     const inp = document.getElementById('targetInput');
     if (inp) inp.focus();
@@ -1271,8 +1110,6 @@ function stopSolve() {
     state.backgroundChecking = false;
     state.backgroundJobId = null;
     state.backgroundMessage = '';
-    state.backgroundVersion = 0;
-    state.backgroundStage = '';
     state.progress = null;
     render();
 }
@@ -1287,7 +1124,7 @@ function rememberResult(target, digit, result) {
 
 async function pollImprovement(jobId, target, token) {
     while (token === currentPollToken && state.backgroundChecking && state.backgroundJobId === jobId) {
-        await new Promise(resolve => setTimeout(resolve, 1200));
+        await new Promise(resolve => setTimeout(resolve, 900));
 
         let data = null;
         try {
@@ -1296,55 +1133,32 @@ async function pollImprovement(jobId, target, token) {
         } catch (_) {
             state.backgroundChecking = false;
             state.backgroundMessage = '';
-            state.backgroundStage = '';
-            render();
             return;
         }
 
         if (token !== currentPollToken || state.backgroundJobId !== jobId) return;
 
-        // Update stage name (no render — just update the DOM element directly)
-        state.backgroundStage = data.stage || '';
-        const stageEl = document.querySelector('[data-bg-stage]');
-        if (stageEl) stageEl.textContent = `⟳ ${state.backgroundStage || 'background'} running…`;
-
-        console.log('[tchisel poll]', {
-            stage: data.stage, status: data.status,
-            improved: data.improved, version: data.version,
-            finished: `${data.finishedCount}/${data.totalCount}`,
-            bestDigits: data.best?.digits, bestSource: data.best?.source,
-        });
-
-        const version = Number(data.version || 0);
-        const hasNewImprovement = data.improved && data.best && version > state.backgroundVersion;
-
-        if (hasNewImprovement) {
-            const oldDigits = state.result?.digits;
-            const improved = normalizeResult(data.best, target);
-            state.result = improved;
-            state.backgroundVersion = version;
-            const src = improved.source || data.best?.source || 'background solver';
-            state.backgroundMessage = `improved by ${src}${oldDigits ? ` (${oldDigits} → ${improved.digits} digits)` : ''}`;
-            rememberResult(target, state.digit, improved);
-            console.log(`[tchisel] ★ improvement: ${oldDigits} → ${improved.digits} from ${src}`);
-            render();
-        }
-
         if (data.running) {
+            // Important: do not call render() here.
+            // The poll loop may run every second; re-rendering here remounts the
+            // result card and makes the formula/display box look like it refreshes.
+            // Keep the background check completely silent while it is running.
             continue;
         }
 
-        // All solvers finished
-        console.log('[tchisel] all background solvers finished');
         state.backgroundChecking = false;
-        state.backgroundStage = '';
         state.progress = null;
 
-        if (!data.improved) {
+        if (data.improved && data.best) {
+            const improved = normalizeResult(data.best, target);
+            state.result = improved;
+            state.backgroundMessage = 'a better solution is found';
+            rememberResult(target, state.digit, improved);
+            render();
+        } else {
             state.backgroundMessage = '';
         }
 
-        render();
         return;
     }
 }
@@ -1363,8 +1177,6 @@ async function doSolve() {
     state.backgroundChecking = false;
     state.backgroundJobId = null;
     state.backgroundMessage = '';
-    state.backgroundVersion = 0;
-    state.backgroundStage = '';
     state.result = null;
     state.error = '';
     state.progress = { label: 'first pass' };
@@ -1403,8 +1215,6 @@ async function doSolve() {
         state.solving = false;
         currentAbort = null;
 
-        state.backgroundVersion = Number(data.version || 0);
-
         rememberResult(target, state.digit, result);
 
         if (data.backgroundRunning && data.jobId) {
@@ -1429,7 +1239,6 @@ async function doSolve() {
         currentAbort = null;
         state.solving = false;
         state.backgroundChecking = false;
-        state.backgroundStage = '';
         state.progress = null;
         render();
     }
@@ -1437,51 +1246,13 @@ async function doSolve() {
 
 render();
 
-// Health check — log which solvers are available
-fetch('/health').then(r => r.json()).then(h => {
-    console.log('[tchisel health]', h);
-    const checks = [
-        ['original', h.originalExists, h.originalExecutable],
-        ['rational', h.rationalExists, h.rationalExecutable],
-        ['irrational', h.irrationalExists, h.irrationalExecutable],
-    ];
-    for (const [name, exists, exe] of checks) {
-        if (exists) console.log(`  ✓ ${name}: ${exe}`);
-        else console.warn(`  ✗ ${name}: NOT FOUND at ${exe}`);
-    }
-}).catch(() => console.warn('[tchisel] server not reachable'));
-
 // ─── Changelog ──────────────────────────────────────────
 const CHANGELOG = [
-    {
-        date: '2026-04-26',
-        tag: 'fix',
-        title: 'Borderless LaTeX copy button',
-        desc: 'Changed the top-right copy icon to be borderless by default, with only a small green hover highlight.'
-    },
-    {
-        date: '2026-04-26',
-        tag: 'feature',
-        title: 'Top-right LaTeX copy button',
-        desc: 'Added a standard green copy icon in the top-right corner of each solution card. It copies the rendered LaTeX equation directly.'
-    },
-    {
-        date: '2026-04-26',
-        tag: 'algo',
-        title: 'Parallel three-solver search',
-        descHtml: 'Starts the integer, rational, and symbolic irrational solvers at the same time. The first result is displayed as soon as any solver finishes, and later results replace it only when they are better. <button class="spoiler-btn" type="button" aria-expanded="false" onclick="toggleChangelogSpoiler(this)">show example</button><span class="spoiler-content" hidden><span class="changelog-math" data-katex-display="true" data-katex="5597 = \\left(4^4-4!\\right)\\left(4!+\\sqrt{\\sqrt{\\sqrt{\\sqrt{4^{-4!}}}}}\\right)"></span></span>'
-    },
-    {
-        date: '2026-04-25',
-        tag: 'algo',
-        title: 'Three-stage solver',
-        descHtml: 'Added separate integer, rational, and symbolic irrational solving passes. The symbolic pass can verify cancellation identities involving radicals. <button class="spoiler-btn" type="button" aria-expanded="false" onclick="toggleChangelogSpoiler(this)">show example</button><span class="spoiler-content" hidden><span class="changelog-math" data-katex-display="true" data-katex="8447 = \\dfrac{\\left(\\sqrt{\\sqrt{5!}}+\\sqrt{\\sqrt{5!}}\\right)^5 \\times \\sqrt{\\sqrt{5!}+\\dfrac{\\sqrt{5!}}{5!}} - 5}{5}"></span></span>'
-    },
     {
         date: '2026-04-24',
         tag: 'algo',
         title: 'Two-stage solver',
-        descHtml: 'Shows an initial solution quickly, then runs a rational pass, replacing the old solution only if a better one is found. <button class="spoiler-btn" type="button" aria-expanded="false" onclick="toggleChangelogSpoiler(this)">show example</button><span class="spoiler-content" hidden><span class="changelog-math" data-katex-display="true" data-katex="3141 = 2 \\times \\left(2+2^{-2}\\right) \\times \\left(\\left(2+(2+2)\\right)! - 22\\right)"></span></span>'
+        descHtml: 'Shows an initial solution quickly, then runs a more powerful algorithm, replaces the old solution only if a better one is found. <button class="spoiler-btn" type="button" aria-expanded="false" onclick="toggleChangelogSpoiler(this)">show example</button><span class="spoiler-content" hidden><span class="changelog-math" data-katex-display="true" data-katex="3141 = 2 \\times \\left(2+2^{-2}\\right) \\times \\left(\\left(2+(2+2)\\right)! - 22\\right)"></span></span>'
     },
     {
         date: '2026-04-23',
@@ -1509,15 +1280,21 @@ const CHANGELOG = [
     },
     {
         date: '2026-04-23',
-        tag: 'feature',
-        title: 'Grimoire caching',
-        desc: 'Last 10 solved results are cached. Clicking a Grimoire entry shows the result instantly without re-querying the server.'
+        tag: 'fix',
+        title: 'Redundant parentheses in LaTeX',
+        desc: 'Removed double-wrapping in client LaTeX converter. Parser now strips group nodes; only parent decides wrapping via precedence.'
     },
     {
         date: '2026-04-23',
         tag: 'fix',
-        title: 'Redundant parentheses in LaTeX',
-        desc: 'Removed double-wrapping in client LaTeX converter. Parser now strips group nodes; only parent decides wrapping via precedence.'
+        title: 'Server: ^ and ! parsing',
+        desc: 'Server and client parsers could not handle exponentiation (^) or factorial (!) from solver output. Added power parsing level and postfix ! handling.'
+    },
+    {
+        date: '2026-04-23',
+        tag: 'feature',
+        title: 'Grimoire caching',
+        desc: 'Last 10 solved results are cached. Clicking a Grimoire entry shows the result instantly without re-querying the server.'
     },
     {
         date: '2026-04-22',

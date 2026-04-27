@@ -280,26 +280,26 @@ header p {
 .copy-icon-btn {
     width: 34px;
     height: 34px;
-    border: none;
+    border: 1px solid #2d5a35;
     border-radius: 8px;
-    background: transparent;
+    background: var(--green-dim);
     color: var(--green);
     display: inline-flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .copy-icon-btn:hover {
-    background: #9ece6a22;
+    border-color: var(--green);
     color: var(--green);
     transform: translateY(-1px);
+    box-shadow: 0 0 16px #9ece6a22;
 }
 
 .copy-icon-btn:active {
     transform: translateY(0);
-    background: #9ece6a33;
 }
 
 .copy-icon-btn:focus-visible {
@@ -334,15 +334,8 @@ header p {
 .copy-status.fail { color: var(--red); }
 
 [data-theme="light"] .copy-icon-btn {
-    background: transparent;
-}
-
-[data-theme="light"] .copy-icon-btn:hover {
-    background: #16a34a18;
-}
-
-[data-theme="light"] .copy-icon-btn:active {
-    background: #16a34a26;
+    border-color: #86d09a;
+    background: var(--green-dim);
 }
 
 /* ─── Progress ─── */
@@ -923,11 +916,7 @@ function formulaAstToLatex(node, parentPrec = 0, side = 'none') {
         case 'pow': {
             const bp = precedence(node.base);
             const base = formulaAstToLatex(node.base, 80, 'left');
-
-            // Do not use display-style fractions inside exponents.
-            const exp = formulaAstToLatex(node.exp, 0, 'none')
-                .replaceAll('\\dfrac', '\\frac');
-
+            const exp = formulaAstToLatex(node.exp, 0, 'none');
             return `${wrap(base, bp < 80)}^{${exp}}`;
         }
         case 'neg': {
@@ -1455,12 +1444,6 @@ fetch('/health').then(r => r.json()).then(h => {
 const CHANGELOG = [
     {
         date: '2026-04-26',
-        tag: 'fix',
-        title: 'Borderless LaTeX copy button',
-        desc: 'Changed the top-right copy icon to be borderless by default, with only a small green hover highlight.'
-    },
-    {
-        date: '2026-04-26',
         tag: 'feature',
         title: 'Top-right LaTeX copy button',
         desc: 'Added a standard green copy icon in the top-right corner of each solution card. It copies the rendered LaTeX equation directly.'
@@ -1509,15 +1492,21 @@ const CHANGELOG = [
     },
     {
         date: '2026-04-23',
-        tag: 'feature',
-        title: 'Grimoire caching',
-        desc: 'Last 10 solved results are cached. Clicking a Grimoire entry shows the result instantly without re-querying the server.'
+        tag: 'fix',
+        title: 'Redundant parentheses in LaTeX',
+        desc: 'Removed double-wrapping in client LaTeX converter. Parser now strips group nodes; only parent decides wrapping via precedence.'
     },
     {
         date: '2026-04-23',
         tag: 'fix',
-        title: 'Redundant parentheses in LaTeX',
-        desc: 'Removed double-wrapping in client LaTeX converter. Parser now strips group nodes; only parent decides wrapping via precedence.'
+        title: 'Server: ^ and ! parsing',
+        desc: 'Server and client parsers could not handle exponentiation (^) or factorial (!) from solver output. Added power parsing level and postfix ! handling.'
+    },
+    {
+        date: '2026-04-23',
+        tag: 'feature',
+        title: 'Grimoire caching',
+        desc: 'Last 10 solved results are cached. Clicking a Grimoire entry shows the result instantly without re-querying the server.'
     },
     {
         date: '2026-04-22',

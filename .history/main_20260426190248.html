@@ -280,30 +280,30 @@ header p {
 .copy-icon-btn {
     width: 34px;
     height: 34px;
-    border: none;
+    border: 1px solid transparent;
     border-radius: 8px;
     background: transparent;
-    color: var(--green);
+    color: var(--text-dim);
     display: inline-flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
 .copy-icon-btn:hover {
-    background: #9ece6a22;
-    color: var(--green);
+    background: var(--surface2);
+    border-color: var(--border);
+    color: var(--text);
     transform: translateY(-1px);
 }
 
 .copy-icon-btn:active {
     transform: translateY(0);
-    background: #9ece6a33;
 }
 
 .copy-icon-btn:focus-visible {
-    outline: 2px solid var(--green);
+    outline: 2px solid var(--gold-dim);
     outline-offset: 2px;
 }
 
@@ -315,6 +315,44 @@ header p {
     fill: none;
     stroke-linecap: round;
     stroke-linejoin: round;
+}
+
+.copy-menu {
+    position: absolute;
+    top: 40px;
+    right: 0;
+    min-width: 132px;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: 0 12px 32px #00000033;
+    animation: fadeIn 0.12s ease;
+}
+
+.copy-menu[hidden] {
+    display: none;
+}
+
+.copy-menu button {
+    width: 100%;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.8px;
+    text-align: left;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+
+.copy-menu button:hover {
+    background: var(--surface2);
+    color: var(--gold);
 }
 
 .copy-status {
@@ -332,18 +370,6 @@ header p {
 
 .copy-status.ok { color: var(--green); }
 .copy-status.fail { color: var(--red); }
-
-[data-theme="light"] .copy-icon-btn {
-    background: transparent;
-}
-
-[data-theme="light"] .copy-icon-btn:hover {
-    background: #16a34a18;
-}
-
-[data-theme="light"] .copy-icon-btn:active {
-    background: #16a34a26;
-}
 
 /* ─── Progress ─── */
 .progress-bar {
@@ -923,11 +949,7 @@ function formulaAstToLatex(node, parentPrec = 0, side = 'none') {
         case 'pow': {
             const bp = precedence(node.base);
             const base = formulaAstToLatex(node.base, 80, 'left');
-
-            // Do not use display-style fractions inside exponents.
-            const exp = formulaAstToLatex(node.exp, 0, 'none')
-                .replaceAll('\\dfrac', '\\frac');
-
+            const exp = formulaAstToLatex(node.exp, 0, 'none');
             return `${wrap(base, bp < 80)}^{${exp}}`;
         }
         case 'neg': {
@@ -1016,15 +1038,35 @@ function showCopyStatus(message, ok = true) {
     }, 1400);
 }
 
-async function copyLatexResult(event) {
+function toggleCopyMenu(event) {
     event.stopPropagation();
+    const menu = document.getElementById('copyMenu');
+    if (!menu) return;
+    menu.hidden = !menu.hidden;
+}
+
+function closeCopyMenu() {
+    const menu = document.getElementById('copyMenu');
+    if (menu) menu.hidden = true;
+}
+
+async function copyResult(kind) {
     try {
-        await copyText(currentLatexText());
-        showCopyStatus('copied LaTeX');
+        if (kind === 'latex') {
+            await copyText(currentLatexText());
+            showCopyStatus('copied LaTeX');
+        } else {
+            await copyText(currentRawFormulaText());
+            showCopyStatus('copied formula');
+        }
     } catch (_) {
         showCopyStatus('copy failed', false);
+    } finally {
+        closeCopyMenu();
     }
 }
+
+document.addEventListener('click', closeCopyMenu);
 
 function render() {
     const app = document.getElementById('app');
@@ -1101,12 +1143,16 @@ function render() {
             <div class="result-card ${r.found ? 'success' : 'fail'}">
                 ${r.found ? `
                     <div class="result-copy">
-                        <button class="copy-icon-btn" type="button" title="Copy LaTeX" aria-label="Copy LaTeX" onclick="copyLatexResult(event)">
+                        <button class="copy-icon-btn" type="button" title="Copy" aria-label="Copy solution" onclick="toggleCopyMenu(event)">
                             <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <rect x="8" y="8" width="12" height="12" rx="2"></rect>
                                 <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path>
                             </svg>
                         </button>
+                        <div class="copy-menu" id="copyMenu" hidden onclick="event.stopPropagation()">
+                            <button type="button" onclick="copyResult('latex')">Copy LaTeX</button>
+                            <button type="button" onclick="copyResult('formula')">Copy formula</button>
+                        </div>
                     </div>
                     <div class="copy-status" id="copyStatus" aria-live="polite"></div>
                     <div class="result-badge">
@@ -1455,15 +1501,9 @@ fetch('/health').then(r => r.json()).then(h => {
 const CHANGELOG = [
     {
         date: '2026-04-26',
-        tag: 'fix',
-        title: 'Borderless LaTeX copy button',
-        desc: 'Changed the top-right copy icon to be borderless by default, with only a small green hover highlight.'
-    },
-    {
-        date: '2026-04-26',
         tag: 'feature',
-        title: 'Top-right LaTeX copy button',
-        desc: 'Added a standard green copy icon in the top-right corner of each solution card. It copies the rendered LaTeX equation directly.'
+        title: 'Top-right copy menu',
+        desc: 'Added a standard copy icon in the top-right corner of each solution card. It can copy either the rendered LaTeX form or the raw solver formula.'
     },
     {
         date: '2026-04-26',
@@ -1509,15 +1549,21 @@ const CHANGELOG = [
     },
     {
         date: '2026-04-23',
-        tag: 'feature',
-        title: 'Grimoire caching',
-        desc: 'Last 10 solved results are cached. Clicking a Grimoire entry shows the result instantly without re-querying the server.'
+        tag: 'fix',
+        title: 'Redundant parentheses in LaTeX',
+        desc: 'Removed double-wrapping in client LaTeX converter. Parser now strips group nodes; only parent decides wrapping via precedence.'
     },
     {
         date: '2026-04-23',
         tag: 'fix',
-        title: 'Redundant parentheses in LaTeX',
-        desc: 'Removed double-wrapping in client LaTeX converter. Parser now strips group nodes; only parent decides wrapping via precedence.'
+        title: 'Server: ^ and ! parsing',
+        desc: 'Server and client parsers could not handle exponentiation (^) or factorial (!) from solver output. Added power parsing level and postfix ! handling.'
+    },
+    {
+        date: '2026-04-23',
+        tag: 'feature',
+        title: 'Grimoire caching',
+        desc: 'Last 10 solved results are cached. Clicking a Grimoire entry shows the result instantly without re-querying the server.'
     },
     {
         date: '2026-04-22',

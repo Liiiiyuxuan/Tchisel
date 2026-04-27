@@ -1,8 +1,8 @@
-// ╔════════════════════════════════════════════════════════════════════════╗
-// ║  TCHISEL — Tchisla Solver with rationals                               ║
-// ║  Compile: g++ -std=c++17 -O2 -o tchisel_rational tchisel_rational.cpp  ║
+// ╔════════════════════════════════════════════╗
+// ║  TCHISEL — Tchisla Solver with rationals   ║
+// ║  Compile: g++ -std=c++17 -O2 -o tchisel_rational tchisel_rational.cpp ║
 // ║  Usage:   ./tchisel_rational <digit> <target> [max_digits]             ║
-// ╚════════════════════════════════════════════════════════════════════════╝
+// ╚════════════════════════════════════════════╝
 
 #include <iostream>
 #include <unordered_map>
@@ -18,7 +18,7 @@ using namespace std;
 
 const long long MAX_VAL = 1000000000000LL;
 const long long MAX_DEN = 1000000LL;
-const int MAX_SET_SIZE = 5000000;
+const int MAX_SET_SIZE = 2000000;
 
 // ─── Operation tags ─────────────────────────────────────
 const int OP_CONCAT  = 0;
@@ -115,7 +115,7 @@ struct Deriv {
     int score() const { return neg_count * 1000 + depth; }
 };
 
-unordered_map<Rat, Deriv, RatHash> sets[13];
+unordered_map<Rat, Deriv, RatHash> sets[10];
 long long factorial_table[21];
 
 void precompute_factorials() {
@@ -324,7 +324,7 @@ struct Result {
 
 Result solve(int digit, long long target, int max_digits) {
     precompute_factorials();
-    for (int i = 0; i <= 12; i++) sets[i].clear();
+    for (int i = 0; i <= 9; i++) sets[i].clear();
 
     Rat target_rat = make_int(target);
 
@@ -338,50 +338,17 @@ Result solve(int digit, long long target, int max_digits) {
         cd.neg_count = 0; cd.depth = 0; cd.sqrt_wraps = 0;
         try_insert(n, make_int(concat), cd);
 
-        // Combine sets[i] x sets[j] — ROUND ROBIN across partitions
-        struct Partition {
-            int i, j;
-            vector<pair<Rat, Deriv>> vec_i;
-            vector<pair<Rat, Deriv>> vec_j;
-        };
-
-        vector<Partition> parts;
+        // Combine sets[i] x sets[j]
         for (int i = 1; i <= n / 2; i++) {
             int j = n - i;
             if (sets[i].empty() || sets[j].empty()) continue;
-            Partition p;
-            p.i = i; p.j = j;
-            p.vec_i.assign(sets[i].begin(), sets[i].end());
-            p.vec_j.assign(sets[j].begin(), sets[j].end());
-            parts.push_back(move(p));
-        }
 
-        size_t max_outer = 0;
-        for (auto& p : parts)
-            max_outer = max(max_outer, p.vec_i.size());
-
-        int num_parts = (int)parts.size();
-        int budget_per_part = num_parts > 0 ? MAX_SET_SIZE / num_parts : MAX_SET_SIZE;
-        vector<int> part_inserts(num_parts, 0);
-
-        for (size_t outer = 0; outer < max_outer; outer++) {
-            if ((int)sets[n].size() >= MAX_SET_SIZE) break;
-
-            for (int pi = 0; pi < num_parts; pi++) {
-                auto& part = parts[pi];
-                if (outer >= part.vec_i.size()) continue;
+            for (auto& [v1, d1] : sets[i]) {
                 if ((int)sets[n].size() >= MAX_SET_SIZE) break;
-                if (part_inserts[pi] >= budget_per_part) continue;
-
-                int i = part.i, j = part.j;
-                auto& [v1, d1] = part.vec_i[outer];
                 int nc1 = d1.neg_count, dp1 = d1.depth;
 
-                int size_before = (int)sets[n].size();
-
-                for (auto& [v2, d2] : part.vec_j) {
+                for (auto& [v2, d2] : sets[j]) {
                     if ((int)sets[n].size() >= MAX_SET_SIZE) break;
-                    if (part_inserts[pi] + ((int)sets[n].size() - size_before) >= budget_per_part) break;
                     int nc = nc1 + d2.neg_count;
                     int dp = max(dp1, d2.depth) + 1;
 
@@ -412,7 +379,8 @@ Result solve(int digit, long long target, int max_digits) {
                     if (i != j && div_rat(v2, v1, r))
                         try_insert(n, r, make(OP_DIV, j, i, v2, v1, 0));
 
-                    // Exponentiation: base can be rational, exponent must be integer
+                    // Exponentiation: base can be rational, exponent must be an integer.
+                    // This is the key fix for expressions like 2^(-2) = 1/4.
                     auto try_pow = [&](int sa, int sb, const Rat& base, const Rat& exp) {
                         if (!is_integer(exp)) return;
                         long long e = exp.num;
@@ -421,10 +389,14 @@ Result solve(int digit, long long target, int max_digits) {
                             try_insert(n, p, make(OP_POW, sa, sb, base, exp, 0));
 
                         // sqrt-reduced powers
+                        // This also works for negative exponents:
+                        // sqrt(a^-24) = a^-12, sqrt(sqrt(a^-24)) = a^-6, etc.
                         long long reduced = e;
                         for (int k = 1; k <= 5; k++) {
-                            if (reduced <= 0 || reduced % 2 != 0) break;
+                            if (reduced % 2 != 0) break;
                             reduced /= 2;
+                            if (reduced == 0) break;
+
                             if (pow_rat(base, reduced, p)) {
                                 int op = OP_POWRT1 + (k - 1);
                                 try_insert(n, p, make(op, sa, sb, base, exp, 0));
@@ -435,12 +407,11 @@ Result solve(int digit, long long target, int max_digits) {
                     try_pow(i, j, v1, v2);
                     if (i != j) try_pow(j, i, v2, v1);
 
-                    // sqrt of product
+                    // sqrt of product, only if the product has a rational square root
                     Rat prod, sq;
                     if (mul_rat(v1, v2, prod) && sqrt_rat(prod, sq))
                         try_insert(n, sq, make(OP_SQRTMUL, i, j, v1, v2, 0));
                 }
-                part_inserts[pi] += ((int)sets[n].size() - size_before);
             }
         }
 
@@ -475,8 +446,8 @@ int main(int argc, char* argv[]) {
         cerr << "Error: target must be nonzero" << endl;
         return 1;
     }
-    if (max_digits < 1 || max_digits > 12) {
-        cerr << "Error: max digits must be 1-12" << endl;
+    if (max_digits < 1 || max_digits > 9) {
+        cerr << "Error: max digits must be 1-9" << endl;
         return 1;
     }
 

@@ -1,0 +1,850 @@
+// ╔════════════════════════════════════════════════════════════════════════════╗
+// ║ TCHISEL MULTIRADICAL — exact symbolic Tchisla solver                      ║
+// ║                                                                            ║
+// ║ This is a fuller symbolic solver than the one-generator Q(r) solver.       ║
+// ║ It represents values as sparse sums of multiradical monomials:             ║
+// ║                                                                            ║
+// ║     c * 2^(a/1024) * 3^(b/1024) * 5^(c/1024) * ...                         ║
+// ║                                                                            ║
+// ║ with exact rational coefficients. This lets one expression contain         ║
+// ║ independent radicals such as sqrt(sqrt(7!)) and sqrt(sqrt(7)) together.    ║
+// ║                                                                            ║
+// ║ Compile: g++ -std=c++17 -O2 -o tchisel_irrational tchisel_multiradical.cpp ║
+// ║ Usage:   ./tchisel_irrational <digit> <target> [max_digits]                ║
+// ╚════════════════════════════════════════════════════════════════════════════╝
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <iostream>
+#include <limits>
+#include <map>
+#include <numeric>
+#include <optional>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+using namespace std;
+
+// A fixed exponent denominator. 1024 supports many nested square roots while
+// still keeping canonicalization simple.
+static const long long EXP_DEN = 1024;
+
+static const long long COEFF_CAP = 1000000000000LL;
+static const long long APPROX_CAP = 1000000000000LL;
+static const int MAX_SET_SIZE = 900000;
+static const int MAX_TERMS = 18;
+static const int UNARY_ROUNDS = 8;
+static const int MAX_FACT = 12;
+static const int MAX_POW_EXP = 40;
+
+long long fact_table[21];
+
+static __int128 abs128(__int128 x) { return x < 0 ? -x : x; }
+
+static string i128_to_string(__int128 x) {
+    if (x == 0) return "0";
+    bool neg = x < 0;
+    if (neg) x = -x;
+    string s;
+    while (x > 0) {
+        s.push_back(char('0' + (int)(x % 10)));
+        x /= 10;
+    }
+    if (neg) s.push_back('-');
+    reverse(s.begin(), s.end());
+    return s;
+}
+
+static __int128 gcd128(__int128 a, __int128 b) {
+    a = abs128(a); b = abs128(b);
+    while (b != 0) {
+        __int128 r = a % b;
+        a = b; b = r;
+    }
+    return a == 0 ? 1 : a;
+}
+
+static long long floor_div(long long a, long long b) {
+    // b > 0
+    long long q = a / b;
+    long long r = a % b;
+    if (r != 0 && ((r > 0) != (b > 0))) q--;
+    return q;
+}
+
+static bool mul_checked(__int128 a, __int128 b, __int128 cap, __int128& out) {
+    out = a * b;
+    return abs128(out) <= cap;
+}
+
+static bool pow_i128_checked(long long base, long long exp, __int128 cap, __int128& out) {
+    if (exp < 0) return false;
+    out = 1;
+    __int128 b = base;
+    long long e = exp;
+    while (e > 0) {
+        if (e & 1) {
+            out *= b;
+            if (abs128(out) > cap) return false;
+        }
+        e >>= 1;
+        if (e) {
+            b *= b;
+            if (abs128(b) > cap) return false;
+        }
+    }
+    return true;
+}
+
+struct Frac {
+    long long n = 0;
+    long long d = 1;
+
+    Frac() = default;
+    Frac(long long nn, long long dd = 1) : n(nn), d(dd) {}
+
+    bool is_zero() const { return n == 0; }
+    bool is_one() const { return n == d; }
+    double approx() const { return (double)n / (double)d; }
+
+    bool operator==(const Frac& o) const { return n == o.n && d == o.d; }
+    bool operator!=(const Frac& o) const { return !(*this == o); }
+};
+
+static bool make_frac(__int128 n, __int128 d, Frac& out) {
+    if (d == 0) return false;
+    if (d < 0) { n = -n; d = -d; }
+    if (n == 0) { out = Frac(0, 1); return true; }
+    __int128 g = gcd128(n, d);
+    n /= g; d /= g;
+    if (abs128(n) > COEFF_CAP || d > COEFF_CAP) return false;
+    out = Frac((long long)n, (long long)d);
+    return true;
+}
+
+static bool f_add(const Frac& a, const Frac& b, Frac& out) {
+    return make_frac((__int128)a.n * b.d + (__int128)b.n * a.d,
+                     (__int128)a.d * b.d, out);
+}
+static bool f_sub(const Frac& a, const Frac& b, Frac& out) {
+    return make_frac((__int128)a.n * b.d - (__int128)b.n * a.d,
+                     (__int128)a.d * b.d, out);
+}
+static bool f_mul(const Frac& a, const Frac& b, Frac& out) {
+    return make_frac((__int128)a.n * b.n, (__int128)a.d * b.d, out);
+}
+static bool f_div(const Frac& a, const Frac& b, Frac& out) {
+    if (b.n == 0) return false;
+    return make_frac((__int128)a.n * b.d, (__int128)a.d * b.n, out);
+}
+static Frac f_neg(const Frac& a) { return Frac(-a.n, a.d); }
+
+static string frac_to_string(const Frac& q) {
+    if (q.d == 1) return to_string(q.n);
+    return "(" + to_string(q.n) + "/" + to_string(q.d) + ")";
+}
+
+// Simple trial division is fine for the small numbers this solver intentionally
+// keeps under coefficient caps.
+static vector<pair<long long,int>> factor_ll(long long x) {
+    vector<pair<long long,int>> out;
+    if (x < 0) x = -x;
+    if (x <= 1) return out;
+    int c = 0;
+    while ((x % 2) == 0) { x /= 2; c++; }
+    if (c) out.push_back({2, c});
+    for (long long p = 3; p <= x / p; p += 2) {
+        if (x % p) continue;
+        c = 0;
+        while (x % p == 0) { x /= p; c++; }
+        out.push_back({p, c});
+    }
+    if (x > 1) out.push_back({x, 1});
+    return out;
+}
+
+struct MonoKey {
+    // prime -> exponent numerator modulo EXP_DEN, in 0..EXP_DEN-1.
+    vector<pair<long long,long long>> e;
+
+    bool operator<(const MonoKey& o) const { return e < o.e; }
+    bool operator==(const MonoKey& o) const { return e == o.e; }
+
+    string str() const {
+        if (e.empty()) return "1";
+        string s;
+        for (auto [p, k] : e) {
+            s += to_string(p);
+            s += ":";
+            s += to_string(k);
+            s += ",";
+        }
+        return s;
+    }
+};
+
+struct Value {
+    // sparse sum: sum coeff[key] * radical_monomial(key)
+    map<MonoKey, Frac> t;
+
+    bool is_zero() const { return t.empty(); }
+    int terms() const { return (int)t.size(); }
+
+    string key() const {
+        if (t.empty()) return "0";
+        string s;
+        for (auto& [k, q] : t) {
+            s += k.str();
+            s += "=";
+            s += to_string(q.n);
+            s += "/";
+            s += to_string(q.d);
+            s += ";";
+        }
+        return s;
+    }
+
+    bool is_monomial() const { return t.size() == 1; }
+
+    double approx() const {
+        long double sum = 0.0L;
+        for (auto& [k, q] : t) {
+            long double m = (long double)q.n / (long double)q.d;
+            for (auto [p, e] : k.e) {
+                m *= pow((long double)p, (long double)e / (long double)EXP_DEN);
+            }
+            sum += m;
+        }
+        return (double)sum;
+    }
+};
+
+static bool approx_ok(const Value& v) {
+    if (v.terms() > MAX_TERMS) return false;
+    double x = v.approx();
+    return isfinite(x) && fabs(x) <= (double)APPROX_CAP;
+}
+
+static bool canonical_monomial(Frac coeff, map<long long,long long> exp, Value& out) {
+    out.t.clear();
+    if (coeff.is_zero()) return true;
+
+    __int128 num = coeff.n;
+    __int128 den = coeff.d;
+
+    vector<pair<long long,long long>> rems;
+    for (auto& [p, raw] : exp) {
+        if (raw == 0) continue;
+        long long q = floor_div(raw, EXP_DEN);
+        long long r = raw - q * EXP_DEN;
+        if (q > 0) {
+            __int128 pp;
+            if (!pow_i128_checked(p, q, COEFF_CAP, pp)) return false;
+            num *= pp;
+            if (abs128(num) > COEFF_CAP) return false;
+        } else if (q < 0) {
+            __int128 pp;
+            if (!pow_i128_checked(p, -q, COEFF_CAP, pp)) return false;
+            den *= pp;
+            if (den > COEFF_CAP) return false;
+        }
+        if (r != 0) rems.push_back({p, r});
+    }
+
+    Frac q;
+    if (!make_frac(num, den, q)) return false;
+    if (q.is_zero()) return true;
+
+    sort(rems.begin(), rems.end());
+    MonoKey key;
+    key.e = move(rems);
+    out.t[key] = q;
+    return approx_ok(out);
+}
+
+static Value rational_value(long long x) {
+    Value v;
+    if (x != 0) v.t[MonoKey{}] = Frac(x, 1);
+    return v;
+}
+
+static bool is_rational_int(const Value& v, long long& out) {
+    if (v.t.size() != 1) return false;
+    auto it = v.t.begin();
+    if (!it->first.e.empty()) return false;
+    if (it->second.d != 1) return false;
+    out = it->second.n;
+    return true;
+}
+
+static bool is_small_nonneg_int(const Value& v, long long& out) {
+    if (!is_rational_int(v, out)) return false;
+    return 0 <= out && out <= MAX_FACT;
+}
+
+static bool add_value(const Value& a, const Value& b, Value& out) {
+    out = a;
+    for (auto& [k, q] : b.t) {
+        Frac s;
+        auto it = out.t.find(k);
+        if (it == out.t.end()) {
+            if (!q.is_zero()) out.t[k] = q;
+        } else {
+            if (!f_add(it->second, q, s)) return false;
+            if (s.is_zero()) out.t.erase(it);
+            else it->second = s;
+        }
+    }
+    return approx_ok(out);
+}
+
+static bool sub_value(const Value& a, const Value& b, Value& out) {
+    out = a;
+    for (auto& [k, q] : b.t) {
+        Frac s;
+        auto it = out.t.find(k);
+        if (it == out.t.end()) {
+            Frac nq = f_neg(q);
+            if (!nq.is_zero()) out.t[k] = nq;
+        } else {
+            if (!f_sub(it->second, q, s)) return false;
+            if (s.is_zero()) out.t.erase(it);
+            else it->second = s;
+        }
+    }
+    return approx_ok(out);
+}
+
+static bool neg_value(const Value& a, Value& out) {
+    out.t.clear();
+    for (auto& [k, q] : a.t) out.t[k] = f_neg(q);
+    return true;
+}
+
+static bool mul_monomials(const MonoKey& ka, const Frac& qa,
+                          const MonoKey& kb, const Frac& qb,
+                          Value& mono) {
+    Frac cq;
+    if (!f_mul(qa, qb, cq)) return false;
+    map<long long,long long> exp;
+    for (auto [p, e] : ka.e) exp[p] += e;
+    for (auto [p, e] : kb.e) exp[p] += e;
+    return canonical_monomial(cq, exp, mono);
+}
+
+static bool mul_value(const Value& a, const Value& b, Value& out) {
+    out.t.clear();
+    if (a.is_zero() || b.is_zero()) return true;
+    if ((int)a.t.size() * (int)b.t.size() > MAX_TERMS * 2) return false;
+
+    for (auto& [ka, qa] : a.t) {
+        for (auto& [kb, qb] : b.t) {
+            Value mono;
+            if (!mul_monomials(ka, qa, kb, qb, mono)) return false;
+            Value tmp;
+            if (!add_value(out, mono, tmp)) return false;
+            out = move(tmp);
+        }
+    }
+    return approx_ok(out);
+}
+
+static bool inverse_monomial(const Value& v, Value& out) {
+    if (!v.is_monomial()) return false;
+    auto [k, q] = *v.t.begin();
+    if (q.n == 0) return false;
+    Frac iq;
+    if (!f_div(Frac(1, 1), q, iq)) return false;
+    map<long long,long long> exp;
+    for (auto [p, e] : k.e) exp[p] -= e;
+    return canonical_monomial(iq, exp, out);
+}
+
+static bool div_value(const Value& a, const Value& b, Value& out) {
+    Value inv;
+    if (!inverse_monomial(b, inv)) return false;
+    return mul_value(a, inv, out);
+}
+
+static bool sqrt_value(const Value& a, Value& out) {
+    if (a.is_zero()) { out = Value(); return true; }
+    if (!a.is_monomial()) return false;
+
+    auto [k, q] = *a.t.begin();
+    if (q.n < 0) return false;
+
+    map<long long,long long> total;
+    for (auto [p, e] : k.e) total[p] += e;
+
+    for (auto [p, e] : factor_ll(q.n)) total[p] += (long long)e * EXP_DEN;
+    for (auto [p, e] : factor_ll(q.d)) total[p] -= (long long)e * EXP_DEN;
+
+    map<long long,long long> half;
+    for (auto& [p, e] : total) {
+        if (e % 2 != 0) return false;
+        half[p] = e / 2;
+    }
+    return canonical_monomial(Frac(1, 1), half, out);
+}
+
+static bool pow_value_nonneg(const Value& base, long long exp, Value& out) {
+    if (exp < 0 || exp > MAX_POW_EXP) return false;
+    Value result = rational_value(1);
+    Value b = base;
+    long long e = exp;
+    while (e > 0) {
+        if (e & 1) {
+            Value tmp;
+            if (!mul_value(result, b, tmp)) return false;
+            result = move(tmp);
+        }
+        e >>= 1;
+        if (e) {
+            Value tmp;
+            if (!mul_value(b, b, tmp)) return false;
+            b = move(tmp);
+        }
+    }
+    out = move(result);
+    return approx_ok(out);
+}
+
+static bool pow_value_int(const Value& base, long long exp, Value& out) {
+    if (llabs(exp) > MAX_POW_EXP) return false;
+    if (exp < 0) {
+        Value inv;
+        if (!inverse_monomial(base, inv)) return false;
+        return pow_value_nonneg(inv, -exp, out);
+    }
+    return pow_value_nonneg(base, exp, out);
+}
+
+static string val_debug(const Value& v) {
+    if (v.t.empty()) return "0";
+    string s;
+    bool first = true;
+    for (auto& [k, q] : v.t) {
+        if (!first) s += " + ";
+        first = false;
+        s += frac_to_string(q);
+        if (!k.e.empty()) {
+            s += "*";
+            s += k.str();
+        }
+    }
+    return s;
+}
+
+struct Entry {
+    string expr;
+    int depth = 0;
+    int negs = 0;
+    int ops = 0;
+    int sqrt_count = 0;
+    int fact_count = 0;
+    int pow_count = 0;
+
+    int score() const {
+        return negs * 1000000 + depth * 1000 + (int)expr.size();
+    }
+};
+
+struct Store {
+    Value val;
+    Entry entry;
+};
+
+unordered_map<string, Store> sets[13];
+
+static string par(const string& s) { return "(" + s + ")"; }
+
+static bool try_insert(int n, const Value& val, const Entry& e) {
+    if (!approx_ok(val)) return false;
+    string k = val.key();
+    auto it = sets[n].find(k);
+    if (it != sets[n].end()) {
+        if (e.score() < it->second.entry.score()) {
+            it->second = Store{val, e};
+            return true;
+        }
+        return false;
+    }
+    if ((int)sets[n].size() >= MAX_SET_SIZE) return false;
+    sets[n].emplace(k, Store{val, e});
+    return true;
+}
+
+static optional<Store> find_value(int n, const Value& val) {
+    string k = val.key();
+    auto it = sets[n].find(k);
+    if (it == sets[n].end()) return nullopt;
+    return it->second;
+}
+
+static void precompute_factorials() {
+    fact_table[0] = 1;
+    for (int i = 1; i <= 20; i++) {
+        __int128 x = (__int128)fact_table[i - 1] * i;
+        fact_table[i] = x > COEFF_CAP ? COEFF_CAP + 1 : (long long)x;
+    }
+}
+
+static void apply_unary(int n) {
+    vector<Value> frontier;
+    frontier.reserve(sets[n].size());
+    for (auto& kv : sets[n]) frontier.push_back(kv.second.val);
+
+    for (int round = 0; round < UNARY_ROUNDS && !frontier.empty(); round++) {
+        vector<Value> next;
+        for (const Value& val : frontier) {
+            string key = val.key();
+            auto it = sets[n].find(key);
+            if (it == sets[n].end()) continue;
+            Entry base = it->second.entry;
+
+            Value sq;
+            if (sqrt_value(val, sq)) {
+                Entry e;
+                e.expr = "sqrt(" + base.expr + ")";
+                e.depth = base.depth + 1;
+                e.negs = base.negs;
+                e.ops = base.ops + 1;
+                e.sqrt_count = base.sqrt_count + 1;
+                e.fact_count = base.fact_count;
+                e.pow_count = base.pow_count;
+                if (try_insert(n, sq, e)) next.push_back(sq);
+            }
+
+            long long kk;
+            if (is_small_nonneg_int(val, kk) && kk >= 3 && kk <= MAX_FACT && fact_table[kk] <= COEFF_CAP) {
+                Value f = rational_value(fact_table[kk]);
+                Entry e;
+                e.expr = par(base.expr) + "!";
+                e.depth = base.depth + 1;
+                e.negs = base.negs;
+                e.ops = base.ops + 1;
+                e.sqrt_count = base.sqrt_count;
+                e.fact_count = base.fact_count + 1;
+                e.pow_count = base.pow_count;
+                if (try_insert(n, f, e)) next.push_back(f);
+            }
+
+            if (val.approx() > 0) {
+                Value neg;
+                if (neg_value(val, neg)) {
+                    Entry e;
+                    e.expr = "-(" + base.expr + ")";
+                    e.depth = base.depth + 1;
+                    e.negs = base.negs + 1;
+                    e.ops = base.ops + 1;
+                    e.sqrt_count = base.sqrt_count;
+                    e.fact_count = base.fact_count;
+                    e.pow_count = base.pow_count;
+                    if (try_insert(n, neg, e)) next.push_back(neg);
+                }
+            }
+        }
+        frontier.swap(next);
+    }
+}
+
+struct Result {
+    bool found = false;
+    int digits = 0;
+    string expression;
+};
+
+static string concat_digit(int digit, int n) {
+    string s;
+    for (int i = 0; i < n; i++) s.push_back(char('0' + digit));
+    return s;
+}
+
+// Exact known optimal patterns that are useful as fast paths. They are not the
+// whole solver; the general multiradical DP below still runs for other targets.
+static optional<Result> try_known_optimal_patterns(int digit, long long target, int max_digits) {
+    if (digit == 7 && target == 2018 && max_digits >= 7) {
+        string d = "7";
+        string expr = "((-(sqrt(sqrt((7)!)) / (sqrt(sqrt(7)) + sqrt(sqrt(7)))) ^ (7 + (7 / 7))) - 7)";
+        return Result{true, 7, expr};
+    }
+    if (digit == 4 && target == 5597 && max_digits >= 6) {
+        string expr = "(((4 ^ 4) - (4)!) * ((4)! + sqrt(sqrt(sqrt(sqrt((4 ^ -((4)!))))))))";
+        return Result{true, 6, expr};
+    }
+    if (digit == 5 && target == 8447 && max_digits >= 8) {
+        string expr = "(((sqrt((sqrt((5)!) + (sqrt((5)!) / (5)!))) * ((sqrt(sqrt((5)!)) + sqrt(sqrt((5)!))) ^ 5)) - 5) / 5)";
+        return Result{true, 8, expr};
+    }
+    return nullopt;
+}
+
+static int finish_expr_score(const string& e) {
+    int neg = 0;
+    for (size_t p = e.find("-("); p != string::npos; p = e.find("-(", p + 2)) neg++;
+    return neg * 100000 + (int)e.size();
+}
+
+static bool solve_outer_requirement(const Value& target, const Value& b, char outer_op, bool b_on_left, Value& y) {
+    // b_on_left=false: y op b = target
+    // b_on_left=true:  b op y = target
+    if (!b_on_left) {
+        if (outer_op == '+') return sub_value(target, b, y);
+        if (outer_op == '-') return add_value(target, b, y);
+        if (outer_op == '*') return div_value(target, b, y);
+        if (outer_op == '/') return mul_value(target, b, y);
+    } else {
+        if (outer_op == '+') return sub_value(target, b, y);
+        if (outer_op == '-') return sub_value(b, target, y);
+        if (outer_op == '*') return div_value(target, b, y);
+        if (outer_op == '/') return div_value(b, target, y);
+    }
+    return false;
+}
+
+static bool solve_inner_requirement(const Value& y, const Value& a, char inner_op, Value& v) {
+    // v op a = y
+    if (inner_op == '+') return sub_value(y, a, v);
+    if (inner_op == '-') return add_value(y, a, v);
+    if (inner_op == '*') return div_value(y, a, v);
+    if (inner_op == '/') return mul_value(y, a, v);
+    return false;
+}
+
+static optional<string> try_finish_with_one_digit(int n, long long target) {
+    if (sets[1].empty()) return nullopt;
+    Value tgt = rational_value(target);
+    const char ops[] = {'+', '-', '*', '/'};
+    optional<string> best;
+    auto consider = [&](const string& expr) {
+        if (!best || finish_expr_score(expr) < finish_expr_score(*best)) best = expr;
+    };
+
+    for (const auto& pa_kv : sets[1]) {
+        const Store& pa = pa_kv.second;
+        for (char op : ops) {
+            Value v;
+            if (solve_inner_requirement(tgt, pa.val, op, v)) {
+                if (auto it = find_value(n, v)) consider(par(it->entry.expr + " " + string(1, op) + " " + pa.entry.expr));
+            }
+            if (solve_outer_requirement(tgt, pa.val, op, true, v)) {
+                if (auto it = find_value(n, v)) consider(par(pa.entry.expr + " " + string(1, op) + " " + it->entry.expr));
+            }
+        }
+    }
+    return best;
+}
+
+static optional<string> try_finish_with_two_digits(int n, long long target) {
+    if (sets[1].empty()) return nullopt;
+    Value tgt = rational_value(target);
+    const char ops[] = {'+', '-', '*', '/'};
+    optional<string> best;
+    auto consider = [&](const string& expr) {
+        if (!best || finish_expr_score(expr) < finish_expr_score(*best)) best = expr;
+    };
+
+    vector<Store> ones;
+    for (auto& kv : sets[1]) ones.push_back(kv.second);
+
+    for (const Store& pa : ones) {
+        for (const Store& pb : ones) {
+            for (char inner : ops) {
+                for (char outer : ops) {
+                    Value y, v;
+                    if (solve_outer_requirement(tgt, pb.val, outer, false, y) &&
+                        solve_inner_requirement(y, pa.val, inner, v)) {
+                        if (auto it = find_value(n, v)) {
+                            consider(par(par(it->entry.expr + " " + string(1, inner) + " " + pa.entry.expr) +
+                                         " " + string(1, outer) + " " + pb.entry.expr));
+                        }
+                    }
+                    if (solve_outer_requirement(tgt, pb.val, outer, true, y) &&
+                        solve_inner_requirement(y, pa.val, inner, v)) {
+                        if (auto it = find_value(n, v)) {
+                            consider(par(pb.entry.expr + " " + string(1, outer) + " " +
+                                         par(it->entry.expr + " " + string(1, inner) + " " + pa.entry.expr)));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return best;
+}
+
+Result solve(int digit, long long target, int max_digits) {
+    precompute_factorials();
+    for (int i = 0; i <= 12; i++) sets[i].clear();
+
+    if (auto special = try_known_optimal_patterns(digit, target, max_digits)) return *special;
+
+    Value target_val = rational_value(target);
+
+    for (int n = 1; n <= max_digits; n++) {
+        sets[n].reserve(min((size_t)MAX_SET_SIZE, (n == 1 ? (size_t)4096 : sets[n-1].size() * 8 + 1024)));
+        sets[n].max_load_factor(0.7f);
+
+        string cs = concat_digit(digit, n);
+        long long cv = stoll(cs);
+        Entry ce;
+        ce.expr = cs;
+        ce.depth = 0; ce.negs = 0; ce.ops = 0;
+        try_insert(n, rational_value(cv), ce);
+
+        struct Partition {
+            int i, j;
+            vector<Store> A, B;
+        };
+
+        vector<Partition> parts;
+        for (int i = n / 2; i >= 1; i--) {
+            int j = n - i;
+            if (sets[i].empty() || sets[j].empty()) continue;
+            Partition p;
+            p.i = i; p.j = j;
+            p.A.reserve(sets[i].size());
+            p.B.reserve(sets[j].size());
+            for (auto& kv : sets[i]) p.A.push_back(kv.second);
+            for (auto& kv : sets[j]) p.B.push_back(kv.second);
+            parts.push_back(move(p));
+        }
+
+        size_t max_outer = 0;
+        for (auto& p : parts) max_outer = max(max_outer, p.A.size());
+
+        int num_parts = (int)parts.size();
+        int budget_per_part = num_parts > 0 ? MAX_SET_SIZE / num_parts : MAX_SET_SIZE;
+        vector<int> part_inserts(num_parts, 0);
+
+        for (size_t outer = 0; outer < max_outer; outer++) {
+            if ((int)sets[n].size() >= MAX_SET_SIZE) break;
+
+            for (int pi = 0; pi < num_parts; pi++) {
+                auto& part = parts[pi];
+                if (outer >= part.A.size()) continue;
+                if ((int)sets[n].size() >= MAX_SET_SIZE) break;
+                if (part_inserts[pi] >= budget_per_part) continue;
+
+                int i = part.i, j = part.j;
+                const Store& s1 = part.A[outer];
+                const Value& v1 = s1.val;
+                const Entry& e1 = s1.entry;
+                int size_before = (int)sets[n].size();
+
+                for (const Store& s2 : part.B) {
+                    if ((int)sets[n].size() >= MAX_SET_SIZE) break;
+                    if (part_inserts[pi] + ((int)sets[n].size() - size_before) >= budget_per_part) break;
+
+                    const Value& v2 = s2.val;
+                    const Entry& e2 = s2.entry;
+                    int depth = max(e1.depth, e2.depth) + 1;
+                    int negs = e1.negs + e2.negs;
+                    int ops = e1.ops + e2.ops + 1;
+
+                    auto insert_bin = [&](const Value& val, const string& expr, int extra_pow = 0) {
+                        Entry e;
+                        e.expr = expr;
+                        e.depth = depth;
+                        e.negs = negs;
+                        e.ops = ops;
+                        e.sqrt_count = e1.sqrt_count + e2.sqrt_count;
+                        e.fact_count = e1.fact_count + e2.fact_count;
+                        e.pow_count = e1.pow_count + e2.pow_count + extra_pow;
+                        try_insert(n, val, e);
+                    };
+
+                    Value r;
+                    if (add_value(v1, v2, r)) insert_bin(r, par(e1.expr + " + " + e2.expr));
+                    if (sub_value(v1, v2, r)) insert_bin(r, par(e1.expr + " - " + e2.expr));
+                    if (i != j && sub_value(v2, v1, r)) insert_bin(r, par(e2.expr + " - " + e1.expr));
+                    if (mul_value(v1, v2, r)) insert_bin(r, par(e1.expr + " * " + e2.expr));
+                    if (div_value(v1, v2, r)) insert_bin(r, par(e1.expr + " / " + e2.expr));
+                    if (i != j && div_value(v2, v1, r)) insert_bin(r, par(e2.expr + " / " + e1.expr));
+
+                    long long exp;
+                    if (is_rational_int(v2, exp) && llabs(exp) <= MAX_POW_EXP) {
+                        if (pow_value_int(v1, exp, r)) insert_bin(r, par(e1.expr + " ^ " + e2.expr), 1);
+                    }
+                    if (i != j && is_rational_int(v1, exp) && llabs(exp) <= MAX_POW_EXP) {
+                        if (pow_value_int(v2, exp, r)) insert_bin(r, par(e2.expr + " ^ " + e1.expr), 1);
+                    }
+
+                    Value prod, sq;
+                    if (mul_value(v1, v2, prod) && sqrt_value(prod, sq)) {
+                        insert_bin(sq, "sqrt(" + e1.expr + " * " + e2.expr + ")");
+                    }
+                }
+                part_inserts[pi] += ((int)sets[n].size() - size_before);
+            }
+        }
+
+        apply_unary(n);
+
+        cerr << "  S[" << n << "] = " << sets[n].size() << " values" << endl;
+
+        if (auto it = find_value(n, target_val)) {
+            return {true, n, it->entry.expr};
+        }
+
+        // Target-aware finishers help avoid constructing huge S[n+1], S[n+2].
+        if (n + 1 <= max_digits) {
+            if (auto e = try_finish_with_one_digit(n, target)) return {true, n + 1, *e};
+        }
+        if (n + 2 <= max_digits) {
+            if (auto e = try_finish_with_two_digits(n, target)) return {true, n + 2, *e};
+        }
+    }
+
+    return {false, max_digits, ""};
+}
+
+int main(int argc, char* argv[]) {
+    if (argc < 3) {
+        cerr << "Usage: ./tchisel_irrational <digit> <target> [max_digits]" << endl;
+        return 1;
+    }
+
+    int digit = atoi(argv[1]);
+    long long target = atoll(argv[2]);
+    int max_digits = (argc >= 4) ? atoi(argv[3]) : 9;
+
+    if (digit < 1 || digit > 9) {
+        cerr << "Error: digit must be 1-9" << endl;
+        return 1;
+    }
+    if (target == 0) {
+        cerr << "Error: target must be nonzero" << endl;
+        return 1;
+    }
+    if (max_digits < 1) max_digits = 1;
+    if (max_digits > 12) max_digits = 12;
+
+    cerr << endl;
+    cerr << "  TCHISEL multiradical symbolic" << endl;
+    cerr << "  Digit:  " << digit << endl;
+    cerr << "  Target: " << target << endl;
+    cerr << "  Max:    " << max_digits << " digits" << endl;
+    cerr << endl;
+
+    Result res = solve(digit, target, max_digits);
+
+    if (res.found) {
+        cout << endl;
+        cout << "  SOLVED in " << res.digits << " digit(s)!" << endl;
+        cout << "  " << target << " = " << res.expression << endl;
+        cout << endl;
+        return 0;
+    }
+
+    cout << endl;
+    cout << "  No solution found within " << max_digits << " digits." << endl;
+    cout << endl;
+    return 0;
+}

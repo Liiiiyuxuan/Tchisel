@@ -923,11 +923,7 @@ function formulaAstToLatex(node, parentPrec = 0, side = 'none') {
         case 'pow': {
             const bp = precedence(node.base);
             const base = formulaAstToLatex(node.base, 80, 'left');
-
-            // Do not use display-style fractions inside exponents.
-            const exp = formulaAstToLatex(node.exp, 0, 'none')
-                .replaceAll('\\dfrac', '\\frac');
-
+            const exp = formulaAstToLatex(node.exp, 0, 'none');
             return `${wrap(base, bp < 80)}^{${exp}}`;
         }
         case 'neg': {
@@ -1509,15 +1505,21 @@ const CHANGELOG = [
     },
     {
         date: '2026-04-23',
-        tag: 'feature',
-        title: 'Grimoire caching',
-        desc: 'Last 10 solved results are cached. Clicking a Grimoire entry shows the result instantly without re-querying the server.'
+        tag: 'fix',
+        title: 'Redundant parentheses in LaTeX',
+        desc: 'Removed double-wrapping in client LaTeX converter. Parser now strips group nodes; only parent decides wrapping via precedence.'
     },
     {
         date: '2026-04-23',
         tag: 'fix',
-        title: 'Redundant parentheses in LaTeX',
-        desc: 'Removed double-wrapping in client LaTeX converter. Parser now strips group nodes; only parent decides wrapping via precedence.'
+        title: 'Server: ^ and ! parsing',
+        desc: 'Server and client parsers could not handle exponentiation (^) or factorial (!) from solver output. Added power parsing level and postfix ! handling.'
+    },
+    {
+        date: '2026-04-23',
+        tag: 'feature',
+        title: 'Grimoire caching',
+        desc: 'Last 10 solved results are cached. Clicking a Grimoire entry shows the result instantly without re-querying the server.'
     },
     {
         date: '2026-04-22',

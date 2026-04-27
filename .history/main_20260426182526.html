@@ -256,6 +256,69 @@ header p {
 
 .result-formula .katex { font-size: 1.6em; }
 
+.result-actions {
+    margin-top: 10px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.copy-btn {
+    padding: 6px 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: linear-gradient(180deg, var(--surface2), var(--surface));
+    color: var(--gold-dim);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: transform 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.copy-btn::before {
+    content: '⧉';
+    color: var(--gold);
+    font-size: 11px;
+    line-height: 1;
+}
+
+.copy-btn:hover {
+    border-color: var(--gold-dim);
+    color: var(--gold);
+    transform: translateY(-1px);
+    box-shadow: 0 0 16px var(--gold-glow);
+}
+
+.copy-btn:active {
+    transform: translateY(0);
+}
+
+.copy-btn:focus-visible {
+    outline: 2px solid var(--gold-dim);
+    outline-offset: 2px;
+}
+
+.copy-status {
+    min-height: 16px;
+    margin-top: 8px;
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+}
+
+.copy-status.ok { color: var(--green); }
+.copy-status.fail { color: var(--red); }
+
 .result-stats {
     margin-top: 16px;
     padding-top: 12px;
@@ -266,83 +329,6 @@ header p {
     display: flex;
     flex-wrap: wrap;
     gap: 12px;
-}
-
-
-/* ─── Copy controls ─── */
-.result-copy {
-    position: absolute;
-    top: 18px;
-    right: 18px;
-    z-index: 5;
-}
-
-.copy-icon-btn {
-    width: 34px;
-    height: 34px;
-    border: none;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--green);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
-}
-
-.copy-icon-btn:hover {
-    background: #9ece6a22;
-    color: var(--green);
-    transform: translateY(-1px);
-}
-
-.copy-icon-btn:active {
-    transform: translateY(0);
-    background: #9ece6a33;
-}
-
-.copy-icon-btn:focus-visible {
-    outline: 2px solid var(--green);
-    outline-offset: 2px;
-}
-
-.copy-icon-btn svg {
-    width: 22px;
-    height: 22px;
-    stroke: currentColor;
-    stroke-width: 2;
-    fill: none;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-}
-
-.copy-status {
-    position: absolute;
-    top: 58px;
-    right: 20px;
-    min-height: 16px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    letter-spacing: 1px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    z-index: 4;
-}
-
-.copy-status.ok { color: var(--green); }
-.copy-status.fail { color: var(--red); }
-
-[data-theme="light"] .copy-icon-btn {
-    background: transparent;
-}
-
-[data-theme="light"] .copy-icon-btn:hover {
-    background: #16a34a18;
-}
-
-[data-theme="light"] .copy-icon-btn:active {
-    background: #16a34a26;
 }
 
 /* ─── Progress ─── */
@@ -923,11 +909,7 @@ function formulaAstToLatex(node, parentPrec = 0, side = 'none') {
         case 'pow': {
             const bp = precedence(node.base);
             const base = formulaAstToLatex(node.base, 80, 'left');
-
-            // Do not use display-style fractions inside exponents.
-            const exp = formulaAstToLatex(node.exp, 0, 'none')
-                .replaceAll('\\dfrac', '\\frac');
-
+            const exp = formulaAstToLatex(node.exp, 0, 'none');
             return `${wrap(base, bp < 80)}^{${exp}}`;
         }
         case 'neg': {
@@ -965,18 +947,19 @@ function formulaToLatex(formula) {
     }
 }
 
-
 function currentRawFormulaText() {
-    if (!state.result || !state.result.found || !state.result.formula) return '';
-    return `${state.target} = ${state.result.formula}`;
+    if (!state.result || !state.result.formula) return '';
+    const target = state.result.target ?? state.target;
+    return `${target} = ${state.result.formula}`;
 }
 
 function currentLatexText() {
-    if (!state.result || !state.result.found) return '';
+    if (!state.result) return '';
+    const target = state.result.target ?? state.target;
     const derivedLatex = formulaToLatex(state.result.formula || '');
     const latex = derivedLatex || state.result.latex || '';
     if (!latex) return currentRawFormulaText();
-    return `${state.target} = ${latex}`;
+    return `\\[\n${target} = ${latex}\n\\]`;
 }
 
 async function copyText(text) {
@@ -987,22 +970,26 @@ async function copyText(text) {
         return;
     }
 
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.setAttribute('readonly', '');
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    ta.style.left = '-9999px';
-    document.body.appendChild(ta);
-    ta.select();
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    textarea.style.top = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
     const ok = document.execCommand('copy');
-    document.body.removeChild(ta);
+    textarea.remove();
+
     if (!ok) throw new Error('Copy failed');
 }
 
 function showCopyStatus(message, ok = true) {
     const el = document.getElementById('copyStatus');
     if (!el) return;
+
     el.textContent = message;
     el.className = `copy-status ${ok ? 'ok' : 'fail'}`;
 
@@ -1013,15 +1000,19 @@ function showCopyStatus(message, ok = true) {
             current.textContent = '';
             current.className = 'copy-status';
         }
-    }, 1400);
+    }, 1600);
 }
 
-async function copyLatexResult(event) {
-    event.stopPropagation();
+async function copyResult(kind) {
     try {
-        await copyText(currentLatexText());
-        showCopyStatus('copied LaTeX');
-    } catch (_) {
+        if (kind === 'latex') {
+            await copyText(currentLatexText());
+            showCopyStatus('copied LaTeX');
+        } else {
+            await copyText(currentRawFormulaText());
+            showCopyStatus('copied formula');
+        }
+    } catch (e) {
         showCopyStatus('copy failed', false);
     }
 }
@@ -1100,19 +1091,15 @@ function render() {
         html += `
             <div class="result-card ${r.found ? 'success' : 'fail'}">
                 ${r.found ? `
-                    <div class="result-copy">
-                        <button class="copy-icon-btn" type="button" title="Copy LaTeX" aria-label="Copy LaTeX" onclick="copyLatexResult(event)">
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                                <rect x="8" y="8" width="12" height="12" rx="2"></rect>
-                                <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path>
-                            </svg>
-                        </button>
-                    </div>
-                    <div class="copy-status" id="copyStatus" aria-live="polite"></div>
                     <div class="result-badge">
                         Solution found — ${r.digits} digit${r.digits>1?'s':''}
                     </div>
                     <div class="result-formula" id="formula"></div>
+                    <div class="result-actions">
+                        <button class="copy-btn" type="button" onclick="copyResult('latex')">copy LaTeX</button>
+                        <button class="copy-btn" type="button" onclick="copyResult('formula')">copy formula</button>
+                    </div>
+                    <div class="copy-status" id="copyStatus" aria-live="polite"></div>
                 ` : `
                     <div class="result-badge">No solution within ${state.maxDigits} digits</div>
                     <div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--red);line-height:1.7">
@@ -1455,15 +1442,9 @@ fetch('/health').then(r => r.json()).then(h => {
 const CHANGELOG = [
     {
         date: '2026-04-26',
-        tag: 'fix',
-        title: 'Borderless LaTeX copy button',
-        desc: 'Changed the top-right copy icon to be borderless by default, with only a small green hover highlight.'
-    },
-    {
-        date: '2026-04-26',
         tag: 'feature',
-        title: 'Top-right LaTeX copy button',
-        desc: 'Added a standard green copy icon in the top-right corner of each solution card. It copies the rendered LaTeX equation directly.'
+        title: 'Copy LaTeX / formula',
+        desc: 'Added copy buttons below each solution: one copies the displayed result as LaTeX, and one copies the raw solver formula.'
     },
     {
         date: '2026-04-26',
@@ -1509,15 +1490,21 @@ const CHANGELOG = [
     },
     {
         date: '2026-04-23',
-        tag: 'feature',
-        title: 'Grimoire caching',
-        desc: 'Last 10 solved results are cached. Clicking a Grimoire entry shows the result instantly without re-querying the server.'
+        tag: 'fix',
+        title: 'Redundant parentheses in LaTeX',
+        desc: 'Removed double-wrapping in client LaTeX converter. Parser now strips group nodes; only parent decides wrapping via precedence.'
     },
     {
         date: '2026-04-23',
         tag: 'fix',
-        title: 'Redundant parentheses in LaTeX',
-        desc: 'Removed double-wrapping in client LaTeX converter. Parser now strips group nodes; only parent decides wrapping via precedence.'
+        title: 'Server: ^ and ! parsing',
+        desc: 'Server and client parsers could not handle exponentiation (^) or factorial (!) from solver output. Added power parsing level and postfix ! handling.'
+    },
+    {
+        date: '2026-04-23',
+        tag: 'feature',
+        title: 'Grimoire caching',
+        desc: 'Last 10 solved results are cached. Clicking a Grimoire entry shows the result instantly without re-querying the server.'
     },
     {
         date: '2026-04-22',
