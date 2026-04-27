@@ -15,8 +15,8 @@ from urllib.parse import urlparse, parse_qs
 BASE_DIR = Path(__file__).resolve().parent
 
 ORIGINAL_EXECUTABLE = BASE_DIR / 'executable/tchiselO'
-RATIONAL_EXECUTABLE = BASE_DIR / 'executable/tchiselRO'
-IRRATIONAL_EXECUTABLE = BASE_DIR / 'executable/tchiselMR'
+RATIONAL_EXECUTABLE = BASE_DIR / 'tchiselRO'
+IRRATIONAL_EXECUTABLE = BASE_DIR / 'tchiselMR'
 
 HTML_FILE = BASE_DIR / 'index.html'
 HOST = '127.0.0.1'

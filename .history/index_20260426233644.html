@@ -6,7 +6,6 @@
 <title>Tchisel — Tchisla Solver</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
-<script src="tchisel_wasm_controller.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@300;400;500&display=swap');
 
@@ -691,20 +690,25 @@ header p {
 //  TCHISEL UI (C++ backend mode)
 //
 //  This page no longer solves in JavaScript.
-// ═══════════════════════════════════════════════════════════
-//  WASM Solver Integration
+//  It keeps the same UI, but sends requests to a local HTTP endpoint
+//  powered by tchisel.cpp (or a wrapper around it).
 //
-//  Three C++ solvers compiled to WASM run in parallel
-//  Web Workers via tchisel_wasm_controller.js:
-//    - solver_integer   (fast, integers only)
-//    - solver_rational  (fractions as intermediates)
-//    - solver_multiradical (irrational intermediates)
+//  Expected endpoint:
+//      POST http://127.0.0.1:8080/solve
+//      { "digit": 8, "target": 1024, "maxDigits": 8 }
 //
-//  The first result is shown immediately; later improvements
-//  replace it only when strictly better.
+//  Expected JSON response:
+//      {
+//        "found": true,
+//        "digits": 3,
+//        "latex": "\\sqrt{...}",
+//        "formula": "optional plain-text formula",
+//        "stats": [[1, 1], [2, 17], [3, 923]],
+//        "message": "optional message"
+//      }
 // ═══════════════════════════════════════════════════════════
 
-// Solvers run in-browser via WASM Web Workers
+const SOLVER_ENDPOINT = '/solve';
 
 let state = {
     digit: null,
@@ -713,7 +717,9 @@ let state = {
     result: null,
     solving: false,
     backgroundChecking: false,
+    backgroundJobId: null,
     backgroundMessage: '',
+    backgroundVersion: 0,
     backgroundStage: '',
     progress: null,
     history: [],
@@ -1083,7 +1089,7 @@ function render() {
                     ${escapeHtml(state.error)}
                 </div>
                 <div class="result-stats">
-                    solver: WASM (in-browser)
+                    endpoint: ${escapeHtml(SOLVER_ENDPOINT)}
                 </div>
             </div>
         `;
@@ -1221,7 +1227,7 @@ function selectDigit(d) {
     state.backgroundChecking = false;
     state.backgroundStage = '';
     state.backgroundMessage = '';
-    tchiselController.cancel();
+    currentPollToken++;
     render();
     const inp = document.getElementById('targetInput');
     if (inp) inp.focus();
@@ -1251,11 +1257,21 @@ function rerun(target, digit) {
     }
 }
 
+let currentAbort = null;
+let currentPollToken = 0;
+
 function stopSolve() {
-    tchiselController.cancel();
+    fetch('/cancel', { method: 'POST' }).catch(() => {});
+    if (currentAbort) {
+        currentAbort.abort();
+        currentAbort = null;
+    }
+    currentPollToken++;
     state.solving = false;
     state.backgroundChecking = false;
+    state.backgroundJobId = null;
     state.backgroundMessage = '';
+    state.backgroundVersion = 0;
     state.backgroundStage = '';
     state.progress = null;
     render();
@@ -1269,100 +1285,174 @@ function rememberResult(target, digit, result) {
     ];
 }
 
-function doSolve() {
+async function pollImprovement(jobId, target, token) {
+    while (token === currentPollToken && state.backgroundChecking && state.backgroundJobId === jobId) {
+        await new Promise(resolve => setTimeout(resolve, 1200));
+
+        let data = null;
+        try {
+            const response = await fetch(`/improve?jobId=${encodeURIComponent(jobId)}`);
+            data = await response.json();
+        } catch (_) {
+            state.backgroundChecking = false;
+            state.backgroundMessage = '';
+            state.backgroundStage = '';
+            render();
+            return;
+        }
+
+        if (token !== currentPollToken || state.backgroundJobId !== jobId) return;
+
+        // Update stage name (no render — just update the DOM element directly)
+        state.backgroundStage = data.stage || '';
+        const stageEl = document.querySelector('[data-bg-stage]');
+        if (stageEl) stageEl.textContent = `⟳ ${state.backgroundStage || 'background'} running…`;
+
+        console.log('[tchisel poll]', {
+            stage: data.stage, status: data.status,
+            improved: data.improved, version: data.version,
+            finished: `${data.finishedCount}/${data.totalCount}`,
+            bestDigits: data.best?.digits, bestSource: data.best?.source,
+        });
+
+        const version = Number(data.version || 0);
+        const hasNewImprovement = data.improved && data.best && version > state.backgroundVersion;
+
+        if (hasNewImprovement) {
+            const oldDigits = state.result?.digits;
+            const improved = normalizeResult(data.best, target);
+            state.result = improved;
+            state.backgroundVersion = version;
+            const src = improved.source || data.best?.source || 'background solver';
+            state.backgroundMessage = `improved by ${src}${oldDigits ? ` (${oldDigits} → ${improved.digits} digits)` : ''}`;
+            rememberResult(target, state.digit, improved);
+            console.log(`[tchisel] ★ improvement: ${oldDigits} → ${improved.digits} from ${src}`);
+            render();
+        }
+
+        if (data.running) {
+            continue;
+        }
+
+        // All solvers finished
+        console.log('[tchisel] all background solvers finished');
+        state.backgroundChecking = false;
+        state.backgroundStage = '';
+        state.progress = null;
+
+        if (!data.improved) {
+            state.backgroundMessage = '';
+        }
+
+        render();
+        return;
+    }
+}
+
+async function doSolve() {
     if (!state.digit || !state.target) return;
 
     const target = parseInt(state.target, 10);
-    if (!Number.isFinite(target) || target === 0) return;
+    if (!Number.isFinite(target)) return;
+
+    if (currentAbort) currentAbort.abort();
+    currentAbort = new AbortController();
+    currentPollToken++;
 
     state.solving = true;
     state.backgroundChecking = false;
+    state.backgroundJobId = null;
     state.backgroundMessage = '';
+    state.backgroundVersion = 0;
     state.backgroundStage = '';
     state.result = null;
     state.error = '';
-    state.progress = { label: 'starting solvers' };
+    state.progress = { label: 'first pass' };
     render();
 
-    const digit = state.digit;
+    const pollToken = currentPollToken;
 
-    tchiselController.solve(digit, target, state.maxDigits, {
-        onFirstResult: (result) => {
-            result = normalizeResult(result, target);
-            state.result = result;
-            state.solving = false;
+    try {
+        const response = await fetch(SOLVER_ENDPOINT, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                digit: state.digit,
+                target,
+                maxDigits: state.maxDigits
+            }),
+            signal: currentAbort.signal
+        });
+
+        const text = await response.text();
+        let data = null;
+        try {
+            data = JSON.parse(text);
+        } catch (_) {
+            throw new Error('The local solver responded, but not with JSON.');
+        }
+
+        if (!response.ok) {
+            throw new Error(data?.message || `Solver returned HTTP ${response.status}.`);
+        }
+
+        const result = normalizeResult(data, target);
+        state.result = result;
+        state.solving = false;
+        currentAbort = null;
+
+        state.backgroundVersion = Number(data.version || 0);
+
+        rememberResult(target, state.digit, result);
+
+        if (data.backgroundRunning && data.jobId) {
             state.backgroundChecking = true;
-            state.backgroundStage = result.source || '';
+            state.backgroundJobId = data.jobId;
+            state.backgroundMessage = '';
             state.progress = null;
-            rememberResult(target, digit, result);
             render();
-        },
-
-        onImprovement: (result) => {
-            const oldDigits = state.result?.digits;
-            result = normalizeResult(result, target);
-            const src = result.source || 'background solver';
-            state.result = result;
-            state.backgroundMessage = `improved by ${src}${oldDigits ? ` (${oldDigits} → ${result.digits} digits)` : ''}`;
-            rememberResult(target, digit, result);
-            console.log(`[tchisel] ★ improvement: ${oldDigits} → ${result.digits} from ${src}`);
-            render();
-        },
-
-        onStage: (stage) => {
-            state.backgroundStage = stage;
-            // Update DOM directly without full re-render
-            const el = document.querySelector('[data-bg-stage]');
-            if (el) {
-                if (stage) {
-                    el.textContent = `⟳ ${stage} running…`;
-                } else {
-                    el.textContent = '';
-                }
-            }
-        },
-
-        onDone: (best, allResults) => {
-            state.backgroundChecking = false;
-            state.backgroundStage = '';
-            state.solving = false;
+            pollImprovement(data.jobId, target, pollToken);
+        } else {
             state.progress = null;
-
-            if (best && best.found) {
-                const result = normalizeResult(best, target);
-                if (!state.result || !state.result.found || result.digits < state.result.digits) {
-                    state.result = result;
-                    rememberResult(target, digit, result);
-                }
-            } else if (!state.result) {
-                state.result = { found: false, message: 'No solution found within the search limit.' };
-            }
-
-            if (!state.backgroundMessage) {
-                state.backgroundMessage = '';
-            }
-
-            console.log('[tchisel] all solvers finished:', allResults.map(r =>
-                `${r.source}: ${r.found ? r.digits + ' digits' : 'not found'}`
-            ).join(', '));
-
             render();
-        },
-    });
+        }
+    } catch (err) {
+        if (err && err.name === 'AbortError') {
+            // User cancelled — no error to show
+        } else {
+            state.error = (err && err.message)
+                ? err.message + ' Run a local server that exposes tchisel.cpp at ' + SOLVER_ENDPOINT + '.'
+                : 'Could not reach the local C++ solver.';
+        }
+        currentAbort = null;
+        state.solving = false;
+        state.backgroundChecking = false;
+        state.backgroundStage = '';
+        state.progress = null;
+        render();
+    }
 }
 
 render();
 
-console.log('[tchisel] WASM mode — solvers run in-browser via Web Workers');
+// Health check — log which solvers are available
+fetch('/health').then(r => r.json()).then(h => {
+    console.log('[tchisel health]', h);
+    const checks = [
+        ['original', h.originalExists, h.originalExecutable],
+        ['rational', h.rationalExists, h.rationalExecutable],
+        ['irrational', h.irrationalExists, h.irrationalExecutable],
+    ];
+    for (const [name, exists, exe] of checks) {
+        if (exists) console.log(`  ✓ ${name}: ${exe}`);
+        else console.warn(`  ✗ ${name}: NOT FOUND at ${exe}`);
+    }
+}).catch(() => console.warn('[tchisel] server not reachable'));
 
 // ─── Changelog ──────────────────────────────────────────
 const CHANGELOG = [
-    {
-        date: '2026-04-26',
-        tag: 'feature',
-        title: 'In-browser WASM solvers',
-        desc: 'All three solvers (integer, rational, multiradical) now run directly in the browser via WebAssembly Web Workers. No server required — works on GitHub Pages.'
-    },
     {
         date: '2026-04-26',
         tag: 'fix',

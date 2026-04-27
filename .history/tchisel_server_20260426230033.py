@@ -13,10 +13,11 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 BASE_DIR = Path(__file__).resolve().parent
+E
 
-ORIGINAL_EXECUTABLE = BASE_DIR / 'executable/tchiselO'
-RATIONAL_EXECUTABLE = BASE_DIR / 'executable/tchiselRO'
-IRRATIONAL_EXECUTABLE = BASE_DIR / 'executable/tchiselMR'
+ORIGINAL_EXECUTABLE = BASE_DIR / 'tchiselO'
+RATIONAL_EXECUTABLE = BASE_DIR / 'tchiselRO'
+IRRATIONAL_EXECUTABLE = BASE_DIR / 'tchiselMR'
 
 HTML_FILE = BASE_DIR / 'index.html'
 HOST = '127.0.0.1'
