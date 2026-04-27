@@ -459,7 +459,7 @@ Result solve(int digit, long long target, int max_digits) {
         }
 
         // Target-aware finishing: check if target is 1-2 ops away from S[n]
-        if (n + 1 <= max_digits) {
+        if (n + 1 == max_digits) {
             long long d = digit;
             // target = x + d → x = target - d
             if (auto it = sets[n].find(make_int(target - d)); it != sets[n].end())
@@ -493,7 +493,7 @@ Result solve(int digit, long long target, int max_digits) {
             if (auto it = sets[n].find(make_int(-target)); it != sets[n].end())
                 return {true, n+1, "-(" + reconstruct(it->first, n) + ")"};
         }
-        if (n + 2 <= max_digits) {
+        if (n + 2 == max_digits) {
             long long d = digit;
             struct { const char* fmt; long long x; } checks[] = {
                 {"((%s + %lld) / %lld)", target * d - d},

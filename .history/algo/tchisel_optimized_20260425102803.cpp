@@ -305,11 +305,11 @@ Result solve(int digit, long long target, int max_digits) {
 
         // Early exit: target is 1-2 simple ops away from S[n]
         // Only check near max_digits to avoid returning suboptimal solutions
-        if (n+1 <= max_digits) {
+        if (n+1 == max_digits) {
             string e = try_finish_one(n, target, digit);
             if (!e.empty()) return {true, n+1, e};
         }
-        if (n+2 <= max_digits) {
+        if (n+2 == max_digits) {
             string e = try_finish_two(n, target, digit);
             if (!e.empty()) return {true, n+2, e};
         }

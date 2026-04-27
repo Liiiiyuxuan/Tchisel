@@ -493,7 +493,7 @@ Result solve(int digit, long long target, int max_digits) {
             if (auto it = sets[n].find(make_int(-target)); it != sets[n].end())
                 return {true, n+1, "-(" + reconstruct(it->first, n) + ")"};
         }
-        if (n + 2 <= max_digits) {
+        if (n + 2 == max_digits) {
             long long d = digit;
             struct { const char* fmt; long long x; } checks[] = {
                 {"((%s + %lld) / %lld)", target * d - d},
