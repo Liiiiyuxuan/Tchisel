@@ -10,15 +10,15 @@ COMMON_FLAGS=(
     -sINITIAL_HEAP=268435456
 )
 
-em++ "tchisel_optimized.cpp" \
-    "${COMMON_FLAGS[@]}" \
-    -sEXPORT_NAME=createTchiselIntegerModule \
-    -o solver_integer.js
+# em++ "tchisel_optimized.cpp" \
+#     "${COMMON_FLAGS[@]}" \
+#     -sEXPORT_NAME=createTchiselIntegerModule \
+#     -o solver_integer.js
 
-em++ "tchisel_rational_optimized.cpp" \
-    "${COMMON_FLAGS[@]}" \
-    -sEXPORT_NAME=createTchiselRationalModule \
-    -o solver_rational.js
+# em++ "tchisel_rational_optimized.cpp" \
+#     "${COMMON_FLAGS[@]}" \
+#     -sEXPORT_NAME=createTchiselRationalModule \
+#     -o solver_rational.js
 
 em++ "tchisel_multiradical.cpp" \
     "${COMMON_FLAGS[@]}" \

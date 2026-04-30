@@ -37,7 +37,7 @@ static const long long EXP_DEN = 1024;
 
 static const long long COEFF_CAP = 1000000000000LL;
 static const long long APPROX_CAP = 1000000000000LL;
-static const int MAX_SET_SIZE = 900000;
+static const int MAX_SET_SIZE = 300000;
 static const int MAX_TERMS = 18;
 static const int UNARY_ROUNDS = 8;
 static const int MAX_FACT = 12;
@@ -487,6 +487,13 @@ static optional<Store> find_value(int n, const Value& val) {
     return it->second;
 }
 
+static optional<Store> find_value_in(const unordered_map<string, Store>& s, const Value& val) {
+    string k = val.key();
+    auto it = s.find(k);
+    if (it == s.end()) return nullopt;
+    return it->second;
+}
+
 static void precompute_factorials() {
     fact_table[0] = 1;
     for (int i = 1; i <= 20; i++) {
@@ -750,6 +757,74 @@ static void add_general_symbolic_seeds(int digit, int max_digits) {
     add_fourth_root_ratio_seed(digit, max_digits);
     add_negative_power_radical_seed(digit, max_digits);
     add_factorial_cancellation_seed(digit, max_digits);
+
+    // Seed: (sqrt(d!!) / d!)^(d!) where d!! = (d!)!
+    // For digit=3: (sqrt(720)/6)^6 = 8000 in S[3]
+    if (digit >= 3 && digit <= 5 && max_digits >= 3) {
+        long long f = fact_table[digit];        // d!
+        if (f <= 12 && fact_table[f] <= COEFF_CAP) {
+            long long ff = fact_table[f];       // (d!)! = d!!
+            string ds = to_string(digit);
+
+            // sqrt(ff) / f, raised to f
+            Value ff_val = rational_value(ff);
+            Value sqrt_ff;
+            if (sqrt_value(ff_val, sqrt_ff)) {
+                Value f_val = rational_value(f);
+                Value ratio;
+                if (div_value(sqrt_ff, f_val, ratio)) {
+                    Value powered;
+                    if (pow_value_nonneg(ratio, f, powered)) {
+                        string expr = "((sqrt((" + ds + ")!)!) / (" + ds + ")!) ^ (" + ds + ")!)";
+                        Entry e;
+                        e.expr = expr;
+                        e.depth = 6; e.negs = 0; e.ops = 4;
+                        try_insert(3, powered, e);
+
+                        long long pv;
+                        if (is_rational_int(powered, pv))
+                            cerr << "  [seed] (sqrt(" << ff << ")/" << f << ")^" << f << " = " << pv << " added to S[3]" << endl;
+                    }
+                }
+            }
+
+            // Also seed: d!! and (d*d)! in S[2], and their sum / d!! in S[4..5]
+            // This produces denominators like (720+362880)/720 = 505
+            {
+                // d!! = (d!)! in S[2]  (e.g. 720 for digit=3)
+                Value ffv = rational_value(ff);
+                Entry e2; e2.expr = "((" + ds + ")!)!"; e2.depth = 3; e2.negs = 0; e2.ops = 2;
+                try_insert(2, ffv, e2);
+
+                // (d*d)! in S[2]  (e.g. 362880 = 9! for digit=3)
+                long long dd = (long long)digit * digit;
+                if (dd <= MAX_FACT && fact_table[dd] <= COEFF_CAP) {
+                    Value ddv = rational_value(fact_table[dd]);
+                    Entry e3; e3.expr = "((" + ds + " * " + ds + ")!)"; e3.depth = 3; e3.negs = 0; e3.ops = 2;
+                    try_insert(2, ddv, e3);
+
+                    // d!! + (d*d)! in S[3]  (e.g. 363600)
+                    Value sum;
+                    if (add_value(ffv, ddv, sum)) {
+                        Entry e4; e4.expr = "((" + ds + ")!)! + (" + ds + " * " + ds + ")!)"; e4.depth = 4; e4.negs = 0; e4.ops = 3;
+                        try_insert(3, sum, e4);
+
+                        // (d!! + (d*d)!) / d!! in S[4]  (e.g. 505)
+                        Value quot;
+                        if (div_value(sum, ffv, quot)) {
+                            Entry e5; e5.expr = "(((" + ds + ")!)! + (" + ds + " * " + ds + ")!) / (" + ds + ")!)!"; 
+                            e5.depth = 5; e5.negs = 0; e5.ops = 4;
+                            try_insert(4, quot, e5);
+                            
+                            long long qv;
+                            if (is_rational_int(quot, qv))
+                                cerr << "  [seed] (" << ff << "+" << fact_table[dd] << ")/" << ff << " = " << qv << " added to S[4]" << endl;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 static int finish_expr_score(const string& e) {
@@ -864,10 +939,9 @@ Result solve(int digit, long long target, int max_digits) {
     add_general_symbolic_seeds(digit, max_digits);
 
     Value target_val = rational_value(target);
+    Result best_result;
 
-    // Fast path for target-independent seeds: if a generated identity already
-    // equals the target, or is one/two ordinary digit operations away, return it
-    // without forcing the DP to build all intermediate sets up to that size.
+    // Fast path for target-independent seeds
     for (int m = 1; m <= max_digits; m++) {
         if (auto it = find_value(m, target_val)) {
             return {true, m, it->entry.expr};
@@ -875,16 +949,27 @@ Result solve(int digit, long long target, int max_digits) {
     }
     for (int m = 1; m + 1 <= max_digits; m++) {
         if (!sets[m].empty()) {
-            if (auto e = try_finish_with_one_digit(m, target)) return {true, m + 1, *e};
+            if (auto e = try_finish_with_one_digit(m, target)) {
+                int d = m + 1;
+                if (!best_result.found || d < best_result.digits)
+                    best_result = {true, d, *e};
+            }
         }
     }
     for (int m = 1; m + 2 <= max_digits; m++) {
         if (!sets[m].empty()) {
-            if (auto e = try_finish_with_two_digits(m, target)) return {true, m + 2, *e};
+            if (auto e = try_finish_with_two_digits(m, target)) {
+                int d = m + 2;
+                if (!best_result.found || d < best_result.digits)
+                    best_result = {true, d, *e};
+            }
         }
     }
 
     for (int n = 1; n <= max_digits; n++) {
+        // If we already have a candidate at n digits or fewer, stop
+        if (best_result.found && n >= best_result.digits)
+            return best_result;
         sets[n].reserve(min((size_t)MAX_SET_SIZE, (n == 1 ? (size_t)4096 : sets[n-1].size() * 8 + 1024)));
         sets[n].max_load_factor(0.7f);
 
@@ -987,18 +1072,229 @@ Result solve(int digit, long long target, int max_digits) {
         cerr << "  S[" << n << "] = " << sets[n].size() << " values" << endl;
 
         if (auto it = find_value(n, target_val)) {
-            return {true, n, it->entry.expr};
+            if (!best_result.found || n < best_result.digits) {
+                best_result = {true, n, it->entry.expr};
+                cerr << "    [direct] found in S[" << n << "]" << endl;
+            }
+            return best_result; // Can't do better than direct find
         }
 
-        // Target-aware finishers help avoid constructing huge S[n+1], S[n+2].
+        // Finishing passes as CANDIDATES — keep building one more level
         if (n + 1 <= max_digits) {
-            if (auto e = try_finish_with_one_digit(n, target)) return {true, n + 1, *e};
+            if (auto e = try_finish_with_one_digit(n, target)) {
+                int d = n + 1;
+                if (!best_result.found || d < best_result.digits) {
+                    best_result = {true, d, *e};
+                    cerr << "    [finish1] candidate: " << d << " digits" << endl;
+                }
+            }
         }
         if (n + 2 <= max_digits) {
-            if (auto e = try_finish_with_two_digits(n, target)) return {true, n + 2, *e};
+            if (auto e = try_finish_with_two_digits(n, target)) {
+                int d = n + 2;
+                if (!best_result.found || d < best_result.digits) {
+                    best_result = {true, d, *e};
+                    cerr << "    [finish2] candidate: " << d << " digits" << endl;
+                }
+            }
+        }
+
+        // TARGET-ONLY SCAN: check if target = S[i] op S[j] for partitions
+        // we already have, without building the full combined set.
+        // Only scan integer values for +/- (irrationals can't sum to integer
+        // unless they cancel, which requires matching keys — too expensive to check).
+        // For */÷ scan monomials (√a × √b can produce integers).
+        for (int total = n + 1; total <= max_digits; total++) {
+            if (best_result.found && total >= best_result.digits) break;
+            for (int i = 1; i <= n && i <= total / 2; i++) {
+                int j = total - i;
+                if (j > n || j < i) continue;
+                if (sets[i].empty() || sets[j].empty()) continue;
+
+                // Build fast integer lookup for set j
+                unordered_map<long long, const Store*> int_index_j;
+                for (auto& [k, s] : sets[j]) {
+                    long long v;
+                    if (is_rational_int(s.val, v)) int_index_j[v] = &s;
+                }
+
+                // Scan integer values in set i, look up needed integer in set j
+                for (auto& [k, s] : sets[i]) {
+                    long long v1;
+                    if (!is_rational_int(s.val, v1)) continue;
+
+                    // target = v1 + v2 → v2 = target - v1
+                    long long need;
+                    need = target - v1;
+                    if (auto it = int_index_j.find(need); it != int_index_j.end()) {
+                        string expr = par(s.entry.expr + " + " + it->second->entry.expr);
+                        if (!best_result.found || total < best_result.digits) {
+                            best_result = {true, total, expr};
+                            cerr << "    [target-scan] S[" << i << "]+S[" << j << "] = " << total << " digits" << endl;
+                        }
+                    }
+                    // target = v1 - v2 → v2 = v1 - target
+                    need = v1 - target;
+                    if (auto it = int_index_j.find(need); it != int_index_j.end()) {
+                        string expr = par(s.entry.expr + " - " + it->second->entry.expr);
+                        if (!best_result.found || total < best_result.digits)
+                            best_result = {true, total, expr};
+                    }
+                    // target = v2 - v1 → v2 = target + v1
+                    need = target + v1;
+                    if (llabs(need) <= COEFF_CAP) {
+                        if (auto it = int_index_j.find(need); it != int_index_j.end()) {
+                            string expr = par(it->second->entry.expr + " - " + s.entry.expr);
+                            if (!best_result.found || total < best_result.digits)
+                                best_result = {true, total, expr};
+                        }
+                    }
+                    // target = v1 * v2 → v2 = target / v1
+                    if (v1 != 0 && target % v1 == 0) {
+                        need = target / v1;
+                        if (auto it = int_index_j.find(need); it != int_index_j.end()) {
+                            string expr = par(s.entry.expr + " * " + it->second->entry.expr);
+                            if (!best_result.found || total < best_result.digits)
+                                best_result = {true, total, expr};
+                        }
+                    }
+                    // target = v1 / v2 → v2 = v1 / target
+                    if (target != 0 && v1 % target == 0) {
+                        need = v1 / target;
+                        if (auto it = int_index_j.find(need); it != int_index_j.end()) {
+                            string expr = par(s.entry.expr + " / " + it->second->entry.expr);
+                            if (!best_result.found || total < best_result.digits)
+                                best_result = {true, total, expr};
+                        }
+                    }
+                    // target = v2 / v1 → v2 = target * v1
+                    if (v1 != 0) {
+                        __int128 prod = (__int128)target * v1;
+                        if (abs128(prod) <= COEFF_CAP) {
+                            need = (long long)prod;
+                            if (auto it = int_index_j.find(need); it != int_index_j.end()) {
+                                string expr = par(it->second->entry.expr + " / " + s.entry.expr);
+                                if (!best_result.found || total < best_result.digits)
+                                    best_result = {true, total, expr};
+                            }
+                        }
+                    }
+                }
+
+                // THREE-WAY TARGET SCAN: target = v_a op1 (v_b op2 v_c)
+        // This finds solutions like 7495 = S[3] - S[3]/S[1] without building S[4..7].
+        // Iterate integer values in S[n], compute residual, then check if residual
+        // can be expressed as S[i] op S[j] for small i,j.
+        {
+            // Build integer index for S[n]
+            vector<pair<long long, const Store*>> n_ints;
+            for (auto& [k, s] : sets[n]) {
+                long long v;
+                if (is_rational_int(s.val, v)) n_ints.push_back({v, &s});
+            }
+
+            for (int i = 1; i <= n; i++) {
+                for (int j = 1; j <= n; j++) {
+                    int total = n + i + j;
+                    if (total > max_digits) continue;
+                    if (best_result.found && total >= best_result.digits) continue;
+                    if (sets[i].empty() || sets[j].empty()) continue;
+
+                    // Build integer index for S[j]
+                    unordered_map<long long, const Store*> j_ints;
+                    for (auto& [k2, s2] : sets[j]) {
+                        long long v;
+                        if (is_rational_int(s2.val, v)) j_ints[v] = &s2;
+                    }
+                    if (j_ints.empty()) continue;
+
+                    for (auto& [va, sa] : n_ints) {
+                        // target = va + (vi / vj) → vi / vj = target - va → vi = (target - va) * vj
+                        // target = va - (vi / vj) → vi / vj = va - target → vi = (va - target) * vj
+                        // target = va * (vi + vj) etc. — focus on common patterns
+                        long long residuals[2] = {target - va, va - target};
+
+                        for (int ri = 0; ri < 2; ri++) {
+                            long long res = residuals[ri];
+                            if (res == 0) continue;
+                            char outer_op = (ri == 0) ? '+' : '-';
+
+                            // Check: res = vi / vj → vi = res * vj
+                            for (auto& [vj, sj] : j_ints) {
+                                if (vj == 0) continue;
+                                __int128 vi_need = (__int128)res * vj;
+                                if (abs128(vi_need) > COEFF_CAP) continue;
+                                long long vi_need_ll = (long long)vi_need;
+
+                                // Check if vi_need_ll exists in S[i]
+                                Value vi_val = rational_value(vi_need_ll);
+                                if (auto it = find_value(i, vi_val)) {
+                                    // Verify: vi_need / vj = res, va +/- res = target
+                                    if (vi_need_ll % vj != 0) continue;
+                                    long long check = (ri == 0) ? va + vi_need_ll / vj : va - vi_need_ll / vj;
+                                    if (check != target) continue;
+
+                                    string inner = par(it->entry.expr + " / " + sj->entry.expr);
+                                    string expr = par(sa->entry.expr + " " + string(1, outer_op) + " " + inner);
+                                    if (!best_result.found || total < best_result.digits) {
+                                        best_result = {true, total, expr};
+                                        cerr << "    [3-way] S[" << n << "] " << outer_op << " S[" << i << "]/S[" << j << "] = " << total << " digits" << endl;
+                                    }
+                                }
+                            }
+
+                            // Check: res = vi * vj → look up vi = res/vj
+                            for (auto& [vj, sj] : j_ints) {
+                                if (vj == 0 || res % vj != 0) continue;
+                                long long vi_need_ll = res / vj;
+                                Value vi_val = rational_value(vi_need_ll);
+                                if (auto it = find_value(i, vi_val)) {
+                                    string inner = par(it->entry.expr + " * " + sj->entry.expr);
+                                    string expr = par(sa->entry.expr + " " + string(1, outer_op) + " " + inner);
+                                    if (!best_result.found || total < best_result.digits) {
+                                        best_result = {true, total, expr};
+                                        cerr << "    [3-way] S[" << n << "] " << outer_op << " S[" << i << "]*S[" << j << "] = " << total << " digits" << endl;
+                                    }
+                                }
+                            }
+
+                            // Check: res = vi + vj
+                            for (auto& [vj, sj] : j_ints) {
+                                long long vi_need_ll = res - vj;
+                                Value vi_val = rational_value(vi_need_ll);
+                                if (auto it = find_value(i, vi_val)) {
+                                    string inner = par(it->entry.expr + " + " + sj->entry.expr);
+                                    string expr = par(sa->entry.expr + " " + string(1, outer_op) + " " + inner);
+                                    if (!best_result.found || total < best_result.digits) {
+                                        best_result = {true, total, expr};
+                                        cerr << "    [3-way] S[" << n << "] " << outer_op << " S[" << i << "]+S[" << j << "] = " << total << " digits" << endl;
+                                    }
+                                }
+                            }
+
+                            // Check: res = vi - vj
+                            for (auto& [vj, sj] : j_ints) {
+                                long long vi_need_ll = res + vj;
+                                Value vi_val = rational_value(vi_need_ll);
+                                if (auto it = find_value(i, vi_val)) {
+                                    string inner = par(it->entry.expr + " - " + sj->entry.expr);
+                                    string expr = par(sa->entry.expr + " " + string(1, outer_op) + " " + inner);
+                                    if (!best_result.found || total < best_result.digits) {
+                                        best_result = {true, total, expr};
+                                        cerr << "    [3-way] S[" << n << "] " << outer_op << " S[" << i << "]-S[" << j << "] = " << total << " digits" << endl;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+            }
         }
     }
 
+    if (best_result.found) return best_result;
     return {false, max_digits, ""};
 }
 
